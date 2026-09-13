@@ -1,0 +1,44 @@
+# Service-account keys and local secrets
+credentials.json
+credentials*.json
+*-credentials.json
+*.var
+*.pem
+*.key
+*.crt
+.env
+.env.*
+
+# Project-specific installer configuration
+config.yaml
+config.local.yaml
+config.*-test.yaml
+config.*.local.yaml
+
+# Appliance images and conversion artifacts
+*.ova
+*.ovf
+*.vmdk
+*.qcow2
+*.raw
+
+# Generated binaries, state and logs
+bin/
+.coriolis-stackit/
+*.log
+
+# Local maintenance and diagnostic material
+.maintenance/
+image_list.output
+Coriolis.code-workspace
+
+# Terraform and editor artifacts
+*.tfstate
+*.tfstate.*
+terraform.tfvars
+terraform.tfvars.json
+.terraform/
+.terraform.lock.hcl
+.DS_Store
+.idea/
+.vscode/

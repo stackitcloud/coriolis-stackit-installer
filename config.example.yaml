@@ -1,0 +1,110 @@
+project_id: 00000000-0000-0000-0000-000000000000
+credentials: credentials.json
+ova: coriolis-appliance-stackit-0.ova
+region: eu01
+
+timeout: 90m
+poll_interval: 15s
+upload_attempts: 3
+
+# Separate management channel used by the installer. It does not change or
+# require the Coriolis support SSH service.
+agent:
+  enabled: true
+
+# Temporary source and scratch disks perform sustained block copies,
+# conversion, image upload and later backup/restore work. perf1 is normally
+# too slow for this path; use perf12 unless deliberately overridden.
+normalization:
+  performance_class: storage_premium_perf12
+  scratch_size_gib: 64
+  # Public Ubuntu 24.04 image used only by the temporary helper VM in eu01.
+  helper_image_id: 95d77000-d977-4ed1-8639-70ca359a5d1a
+  helper_machine_type: g1a.1d
+  # The helper boot disk holds only Ubuntu and qemu-img; data I/O uses perf12.
+  helper_boot_size_gib: 16
+
+image:
+  # Optional: ID eines bereits in diesem Projekt sichtbaren (auch geteilten) Images.
+  # Ohne ID sucht der Installer automatisch anhand des OVA-Hashs.
+  id: ""
+  # Optionales zentrales Image-Projekt. Bei abweichendem Zielprojekt wird das
+  # Image dort gesucht/hochgeladen und automatisch mit dem Zielprojekt geteilt.
+  owner_project_id: ""
+  share:
+    # Entweder organisationsweit oder mit den unten genannten Projekten teilen.
+    parent_organization: false
+    project_ids: []
+  name_prefix: coriolis-appliance
+  uefi: false
+  secure_boot: false
+  disk_bus: virtio
+  nic_model: virtio
+
+# Applied through the STACKIT Server Agent after the normalized appliance boots.
+# No serial console, WebConsole, user-data or SSH access is required.
+bootstrap:
+  enabled: true
+  # Empty: generate a unique 32-character password per appliance.
+  admin_password: ""
+  print_generated_password: true
+
+server:
+  # Optional: existing server ID. The installer adopts it without replacing
+  # its boot volume, appliance identity, license or Coriolis data.
+  id: ""
+  name: coriolis-appliance
+  machine_type: c1a.4d
+  availability_zone: eu01-m
+  boot_volume_size_gib: 48
+  performance_class: storage_premium_perf12
+  keypair_name: ""
+  delete_boot_volume_on_termination: false
+
+network:
+  # Set id to reuse an existing network. Otherwise a network with this name is reused/created.
+  id: ""
+  name: coriolis-network
+  ipv4_prefix: 10.1.100.0/24
+  routed: true
+
+public_ip: true
+# Optional: assign this existing reserved IP instead of selecting/creating one.
+public_ip_id: ""
+# Alternatively select it by its literal address.
+public_ip_address: ""
+
+dns:
+  enabled: true
+  # Create this STACKIT-managed zone if it does not exist; retries reuse it.
+  create_zone: true
+  zone_id: ""
+  zone_name: my-coriolis.runs.onstackit.cloud
+  record_name: coriolis
+  ttl: 300
+
+# Direct access is the default. Set mode explicitly to application_load_balancer
+# only when TLS termination at an ALB is desired.
+exposure:
+  mode: direct
+  certificate:
+    # Install a publicly trusted certificate directly in the appliance.
+    enabled: true
+    email: admin@example.com
+    staging: false
+    renew_before_days: 30
+    name_prefix: coriolis-tls
+  load_balancer:
+    name: coriolis-alb
+    plan_id: p10
+    backend_port: 80
+    health_check_path: /
+
+security_group:
+  name: coriolis-security
+  ingress:
+    # Restrict this CIDR to your admin/VPN network for production.
+    - protocol: tcp
+      port: 443
+      cidr: 0.0.0.0/0
+      description: Coriolis Web UI
