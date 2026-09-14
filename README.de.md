@@ -155,6 +155,23 @@ Bei langsamem Upload oder erstmaligem Import sollte es vorsorglich auf `120m` bi
 `150m` erhöht werden. `storage_premium_perf1` kann insbesondere die beiden
 Konvertierungsschritte stark verlängern; die Schätzungen basieren auf `perf12`.
 
+### Fortschrittsausgabe
+
+Jede Deployment-Phase schreibt ihren Status nach stderr:
+
+```text
+[START] Finding or creating Coriolis appliance server
+[WAIT ] Finding or creating Coriolis appliance server (elapsed 40s)
+[DONE ] Finding or creating Coriolis appliance server (elapsed 53s)
+```
+
+Wenn keine andere sichtbare Aktivität stattfindet, erscheint alle 20 Sekunden ein
+Heartbeat. Fehler verwenden `[FAIL ]` und zeigen die verstrichene Zeit, bevor der
+detaillierte Fehler zurückgegeben wird. Die vorhandenen Prozentanzeigen für den
+VMDK-Transfer und den Image-Upload bleiben aktiv und unterdrücken während eines
+laufenden Datentransfers redundante Heartbeats. Fortschrittsmeldungen gehen nach
+stderr; das maschinenlesbare JSON-Endergebnis bleibt unverändert auf stdout.
+
 ## Technische Voraussetzungen
 
 ### Bedienrechner

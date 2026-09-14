@@ -405,7 +405,7 @@ func (c *Cloud) ensureDirectCertificate(ctx context.Context, cfg CertificateConf
 		return fmt.Errorf("inspect appliance certificate: %w", err)
 	}
 	if strings.Contains(probe, "CERTIFICATE_CURRENT") {
-		fmt.Println("appliance certificate is current")
+		writeStatus("appliance certificate is current\n")
 		return nil
 	}
 	staged, err := c.runShellScriptWithOutput(ctx, c.project, serverID, certificateStagedProbeScript(fqdn, cfg.RenewBeforeDays), false)
@@ -413,7 +413,7 @@ func (c *Cloud) ensureDirectCertificate(ctx context.Context, cfg CertificateConf
 		return fmt.Errorf("inspect staged appliance certificate: %w", err)
 	}
 	if strings.Contains(staged, "STAGED_CERTIFICATE_READY") {
-		fmt.Println("reusing valid staged appliance certificate")
+		writeStatus("reusing valid staged appliance certificate\n")
 	} else {
 		csrOutput, err := c.runShellScriptWithOutput(ctx, c.project, serverID, certificateCSRScript(fqdn), false)
 		if err != nil {
@@ -433,7 +433,7 @@ func (c *Cloud) ensureDirectCertificate(ctx context.Context, cfg CertificateConf
 		if !coversFQDN {
 			return fmt.Errorf("appliance CSR does not cover %s", fqdn)
 		}
-		fmt.Println("requesting trusted appliance certificate for", fqdn)
+		writeStatus("requesting trusted appliance certificate for %s\n", fqdn)
 		issued, err := c.obtainCertificateForCSR(ctx, cfg, zoneID, fqdn, csr)
 		if err != nil {
 			return err
@@ -454,7 +454,7 @@ func (c *Cloud) ensureDirectCertificate(ctx context.Context, cfg CertificateConf
 		if retryableCommandError(err) {
 			confirmed, confirmErr := c.runShellScriptWithOutput(ctx, c.project, serverID, certificateProbeScript(fqdn, cfg.RenewBeforeDays), false)
 			if confirmErr == nil && strings.Contains(confirmed, "CERTIFICATE_CURRENT") {
-				fmt.Println("appliance certificate installation confirmed after an ambiguous run-command status")
+				writeStatus("appliance certificate installation confirmed after an ambiguous run-command status\n")
 				return nil
 			}
 		}

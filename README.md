@@ -154,6 +154,23 @@ import or a slow upload, increase it to `120m` or `150m`. The conversion steps c
 take substantially longer with `storage_premium_perf1`; the estimates above assume
 `perf12`.
 
+### Progress output
+
+Every deployment phase writes a status line to stderr:
+
+```text
+[START] Finding or creating Coriolis appliance server
+[WAIT ] Finding or creating Coriolis appliance server (elapsed 40s)
+[DONE ] Finding or creating Coriolis appliance server (elapsed 53s)
+```
+
+When no other visible progress is produced, a heartbeat is printed every 20
+seconds. Failures use `[FAIL ]` and include the elapsed time before the detailed
+error is returned. Existing percentage displays for VMDK transfer and image upload
+remain active; they suppress redundant heartbeat lines while data is moving.
+Progress goes to stderr, while the final machine-readable JSON result remains on
+stdout.
+
 ## Technical prerequisites
 
 ### Operator workstation

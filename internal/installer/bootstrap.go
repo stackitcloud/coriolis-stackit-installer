@@ -104,7 +104,7 @@ func (c *Cloud) bootstrapAppliance(ctx context.Context, cfg Config, serverID, fq
 		if !retryableCommandError(err) || attempt == 3 {
 			return "", err
 		}
-		fmt.Printf("retrying idempotent appliance bootstrap after transient run-command failure (attempt %d/3)\n", attempt+1)
+		writeStatus("retrying idempotent appliance bootstrap after transient run-command failure (attempt %d/3)\n", attempt+1)
 		select {
 		case <-ctx.Done():
 			return "", ctx.Err()

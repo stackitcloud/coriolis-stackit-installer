@@ -95,6 +95,7 @@ func (c *Cloud) waitRunCommand(ctx context.Context, projectID, serverID, id stri
 		}
 		consecutiveErrors = 0
 		if output := command.GetOutput(); output != lastOutput {
+			markVisibleProgress()
 			if streamOutput && output != "" {
 				if strings.HasPrefix(output, lastOutput) {
 					fmt.Fprint(os.Stderr, output[len(lastOutput):])
@@ -389,18 +390,23 @@ func (r *progressReader) finish(uploadErr error) {
 		return
 	}
 	r.report(uploadErr == nil)
-	fmt.Fprintln(os.Stderr)
+	progressOutputMu.Lock()
+	fmt.Fprintln(progressOutput)
+	progressOutputMu.Unlock()
 	r.finished = true
 }
 
 func (r *progressReader) report(done bool) {
+	markVisibleProgress()
 	percent := float64(r.transferred) * 100 / float64(r.total)
 	if done {
 		percent = 100
 	}
 	elapsed := time.Since(r.started).Seconds()
 	rateMiB := float64(r.transferred) / (1024 * 1024) / elapsed
-	fmt.Fprintf(os.Stderr, "\rupload attempt %d/%d: %6.2f%% (%.2f/%.2f GiB, %.1f MiB/s)", r.attempt, r.attempts, percent, float64(r.transferred)/(1024*1024*1024), float64(r.total)/(1024*1024*1024), rateMiB)
+	progressOutputMu.Lock()
+	fmt.Fprintf(progressOutput, "\rupload attempt %d/%d: %6.2f%% (%.2f/%.2f GiB, %.1f MiB/s)", r.attempt, r.attempts, percent, float64(r.transferred)/(1024*1024*1024), float64(r.total)/(1024*1024*1024), rateMiB)
+	progressOutputMu.Unlock()
 	r.lastReport = time.Now()
 }
 
