@@ -4,11 +4,11 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
 	iaas "github.com/stackitcloud/stackit-sdk-go/services/iaas/v2api"
+	"golang.org/x/crypto/ssh"
 )
 
 const normalizeApplianceScript = `#!/bin/bash
@@ -60,7 +60,7 @@ rm -rf "$target/var/lib/cloud/seed/nocloud" "$target/var/lib/cloud/seed/nocloud-
 printf '%s\n' 'datasource_list: [ OpenStack, ConfigDrive, NoCloud ]' > \
   "$target/etc/cloud/cloud.cfg.d/91-stackit.cfg"
 sync
-echo "NORMALIZATION_OK source=$source_disk scratch=$scratch_disk root=$root_part"
+echo "[INFO ] Remote helper completed offline appliance normalization"
 `
 
 const importVMDKScript = `#!/bin/bash
@@ -72,13 +72,13 @@ scratch=/mnt/coriolis-scratch
 mountpoint -q "$scratch" || mount "$scratch_disk" "$scratch"
 input=$scratch/incoming/source.vmdk
 test -s "$input"
-echo "Converting vendor VMDK directly onto perf12 normalization volume..."
+echo "[INFO ] Remote helper is converting the vendor VMDK onto the normalization volume"
 qemu-img convert -p -f vmdk -O raw "$input" "$source_disk"
 sync
 blockdev --rereadpt "$source_disk" || true
 lsblk "$source_disk"
 rm -f "$input"
-echo VMDK_IMPORT_OK
+echo "[INFO ] Remote helper completed the vendor VMDK conversion"
 `
 
 const exportApplianceScript = `#!/bin/bash
@@ -97,16 +97,16 @@ mkdir -p "$scratch"
 mountpoint -q "$scratch" || mount "$scratch_disk" "$scratch"
 trap 'umount "$scratch" 2>/dev/null || true' EXIT
 rm -f "$output"
-echo "Converting normalized appliance disk..."
+echo "[INFO ] Remote helper is converting the normalized appliance disk to QCOW2"
 qemu-img convert -p -f raw -O qcow2 -o compat=1.1,lazy_refcounts=on "$source_disk" "$output"
 qemu-img check -q "$output"
-echo "Uploading normalized image..."
+echo "[INFO ] Remote helper is uploading the normalized image data to STACKIT"
 curl --fail --show-error --progress-bar --upload-file "$output" "$upload_url"
 rm -f "$output"
 sync
 umount "$scratch"
 trap - EXIT
-echo IMAGE_UPLOAD_OK
+echo "[INFO ] Image data upload completed; STACKIT control-plane image processing follows"
 `
 
 const probeNormalizedApplianceScript = `#!/bin/bash
@@ -168,23 +168,30 @@ func maxInt64(a, b int64) int64 {
 }
 
 func (c *Cloud) waitVolume(ctx context.Context, projectID, volumeID string) (*iaas.Volume, error) {
-	for {
-		volume, err := c.api.DefaultAPI.GetVolume(ctx, projectID, c.region, volumeID).Execute()
-		if err != nil {
-			return nil, err
+	var ready *iaas.Volume
+	err := progressActionWithUpdates(ctx, "Waiting for normalization volume "+volumeID, func(update func(string)) error {
+		for {
+			volume, err := c.api.DefaultAPI.GetVolume(ctx, projectID, c.region, volumeID).Execute()
+			if err != nil {
+				return err
+			}
+			status := strings.ToUpper(volume.GetStatus())
+			switch status {
+			case "AVAILABLE", "ATTACHED":
+				ready = volume
+				return nil
+			case "ERROR", "ERROR_DELETING", "ERROR_RESTORING-BACKUP":
+				return fmt.Errorf("volume %s entered status %s", volumeID, volume.GetStatus())
+			}
+			update("current status " + status)
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(c.poll):
+			}
 		}
-		switch strings.ToUpper(volume.GetStatus()) {
-		case "AVAILABLE", "ATTACHED":
-			return volume, nil
-		case "ERROR", "ERROR_DELETING", "ERROR_RESTORING-BACKUP":
-			return nil, fmt.Errorf("volume %s entered status %s", volumeID, volume.GetStatus())
-		}
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-time.After(c.poll):
-		}
-	}
+	})
+	return ready, err
 }
 
 func (c *Cloud) createNormalizationVolume(ctx context.Context, projectID, zone, name, sourceImageID, performanceClass string, size int64, purpose, sha string) (*iaas.Volume, error) {
@@ -240,7 +247,7 @@ func (c *Cloud) removeStaleNormalizationHelpers(ctx context.Context, projectID, 
 			(serverSHA != "" && serverSHA != sha[:12]) {
 			continue
 		}
-		fmt.Fprintln(os.Stderr, "replacing stale normalization helper", server.GetId())
+		writeInfo("replacing stale normalization helper %s", server.GetId())
 		if err := c.api.DefaultAPI.DeleteServer(ctx, projectID, c.region, server.GetId()).Execute(); err != nil {
 			return fmt.Errorf("delete stale normalization helper %s: %w", server.GetId(), err)
 		}
@@ -270,60 +277,69 @@ func (c *Cloud) normalizedVolumeReady(ctx context.Context, projectID, helperID, 
 	if err != nil {
 		return false
 	}
-	output, err := c.runShellScript(ctx, projectID, helperID, script)
+	output, err := c.runShellScriptWithOutput(ctx, projectID, helperID, script, false)
 	return err == nil && strings.Contains(output, "NORMALIZATION_READY")
 }
 
 func (c *Cloud) cleanupNormalizationResources(ctx context.Context, projectID, helperID, sha string, access *helperSSHAccess, volumeIDs ...string) {
 	if err := c.api.DefaultAPI.DeleteServer(ctx, projectID, c.region, helperID).Execute(); err != nil {
-		fmt.Fprintln(os.Stderr, "warning: delete normalization helper:", err)
+		writeWarning("delete normalization helper: %v", err)
 	}
 	for _, volumeID := range volumeIDs {
 		if err := c.waitVolumeDetachedAndDelete(ctx, projectID, volumeID); err != nil {
-			fmt.Fprintln(os.Stderr, "warning:", err)
+			writeWarning("%v", err)
 		}
 	}
 	c.cleanupHelperSSHAccess(ctx, projectID, access)
 	if err := c.cleanupStaleHelperAccess(ctx, projectID, sha); err != nil {
-		fmt.Fprintln(os.Stderr, "warning: clean up normalization access:", err)
+		writeWarning("clean up normalization access: %v", err)
 	}
 }
 
 func (c *Cloud) waitVolumeAvailable(ctx context.Context, projectID, volumeID string) (*iaas.Volume, error) {
-	for {
-		volume, err := c.api.DefaultAPI.GetVolume(ctx, projectID, c.region, volumeID).Execute()
-		if err != nil {
-			return nil, err
+	var available *iaas.Volume
+	err := progressActionWithUpdates(ctx, "Waiting for normalization volume "+volumeID+" to become AVAILABLE", func(update func(string)) error {
+		for {
+			volume, err := c.api.DefaultAPI.GetVolume(ctx, projectID, c.region, volumeID).Execute()
+			if err != nil {
+				return err
+			}
+			status := strings.ToUpper(volume.GetStatus())
+			switch status {
+			case "AVAILABLE":
+				available = volume
+				return nil
+			case "ERROR", "ERROR_DELETING", "ERROR_RESTORING-BACKUP":
+				return fmt.Errorf("volume %s entered status %s", volumeID, volume.GetStatus())
+			}
+			update("current status " + status)
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(c.poll):
+			}
 		}
-		switch strings.ToUpper(volume.GetStatus()) {
-		case "AVAILABLE":
-			return volume, nil
-		case "ERROR", "ERROR_DELETING", "ERROR_RESTORING-BACKUP":
-			return nil, fmt.Errorf("volume %s entered status %s", volumeID, volume.GetStatus())
-		}
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-time.After(c.poll):
-		}
-	}
+	})
+	return available, err
 }
 
 func (c *Cloud) waitServerAgent(ctx context.Context, projectID, serverID string) error {
-	for {
-		_, err := c.run.DefaultAPI.GetCommandTemplate(ctx, projectID, serverID, "RunShellScript", c.region).Execute()
-		if err == nil {
-			return nil
+	return progressAction(ctx, "Waiting for STACKIT Server Agent on "+serverID, func() error {
+		for {
+			_, err := c.run.DefaultAPI.GetCommandTemplate(ctx, projectID, serverID, "RunShellScript", c.region).Execute()
+			if err == nil {
+				return nil
+			}
+			if strings.Contains(strings.ToLower(err.Error()), "service not enabled") {
+				return fmt.Errorf("wait for STACKIT Server Agent on %s: Run Command service is not enabled in project %s", serverID, projectID)
+			}
+			select {
+			case <-ctx.Done():
+				return fmt.Errorf("wait for STACKIT Server Agent on %s: %w", serverID, ctx.Err())
+			case <-time.After(c.poll):
+			}
 		}
-		if strings.Contains(strings.ToLower(err.Error()), "service not enabled") {
-			return fmt.Errorf("wait for STACKIT Server Agent on %s: Run Command service is not enabled in project %s", serverID, projectID)
-		}
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("wait for STACKIT Server Agent on %s: %w", serverID, ctx.Err())
-		case <-time.After(c.poll):
-		}
-	}
+	})
 }
 
 func (c *Cloud) createNormalizationHelper(ctx context.Context, cfg Config, projectID, zone, networkID, securityGroupID, keypairName, sourceVolumeID, scratchVolumeID, suffix string) (*iaas.Server, error) {
@@ -360,47 +376,61 @@ func (c *Cloud) createNormalizationHelper(ctx context.Context, cfg Config, proje
 }
 
 func (c *Cloud) waitServerInProject(ctx context.Context, projectID, id string) (*iaas.Server, error) {
-	for {
-		server, err := c.api.DefaultAPI.GetServer(ctx, projectID, c.region, id).Execute()
-		if err != nil {
-			return nil, err
+	var active *iaas.Server
+	err := progressActionWithUpdates(ctx, "Waiting for temporary helper "+id+" to become ACTIVE", func(update func(string)) error {
+		for {
+			server, err := c.api.DefaultAPI.GetServer(ctx, projectID, c.region, id).Execute()
+			if err != nil {
+				return err
+			}
+			status := strings.ToUpper(server.GetStatus())
+			switch status {
+			case "ACTIVE":
+				active = server
+				return nil
+			case "ERROR", "DELETED":
+				return fmt.Errorf("server %s entered status %s", id, server.GetStatus())
+			}
+			update("current status " + status)
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(c.poll):
+			}
 		}
-		switch strings.ToUpper(server.GetStatus()) {
-		case "ACTIVE":
-			return server, nil
-		case "ERROR", "DELETED":
-			return nil, fmt.Errorf("server %s entered status %s", id, server.GetStatus())
-		}
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-time.After(c.poll):
-		}
-	}
+	})
+	return active, err
 }
 
 func (c *Cloud) normalizeAndUploadImage(ctx context.Context, projectID string, cfg Config, info OVAInfo, zone, networkID string) (*iaas.Image, error) {
 	short := info.SHA256[:12]
 	diskSize := maxInt64(info.DiskGiB, cfg.Server.BootVolumeSize)
-	source, err := c.findNormalizationVolume(ctx, projectID, info.SHA256, "image-normalization", cfg.Normalization.PerformanceClass)
-	if err != nil {
-		return nil, err
-	}
-	if source == nil {
-		source, err = c.createNormalizationVolume(ctx, projectID, zone, "coriolis-normalization-source-"+short, "", cfg.Normalization.PerformanceClass, diskSize, "image-normalization", info.SHA256)
-		if err != nil {
-			return nil, fmt.Errorf("create normalization source volume: %w", err)
+	var source, scratch *iaas.Volume
+	if err := progressAction(ctx, "Ensuring temporary "+cfg.Normalization.PerformanceClass+" normalization volumes", func() error {
+		var volumeErr error
+		source, volumeErr = c.findNormalizationVolume(ctx, projectID, info.SHA256, "image-normalization", cfg.Normalization.PerformanceClass)
+		if volumeErr != nil {
+			return volumeErr
 		}
-	}
-	scratch, err := c.findNormalizationVolume(ctx, projectID, info.SHA256, "image-normalization-scratch", cfg.Normalization.PerformanceClass)
-	if err != nil {
-		return nil, err
-	}
-	if scratch == nil {
-		scratch, err = c.createNormalizationVolume(ctx, projectID, zone, "coriolis-normalization-scratch-"+short, "", cfg.Normalization.PerformanceClass, cfg.Normalization.ScratchSizeGiB, "image-normalization-scratch", info.SHA256)
-		if err != nil {
-			return nil, fmt.Errorf("create normalization scratch volume: %w", err)
+		if source == nil {
+			source, volumeErr = c.createNormalizationVolume(ctx, projectID, zone, "coriolis-normalization-source-"+short, "", cfg.Normalization.PerformanceClass, diskSize, "image-normalization", info.SHA256)
+			if volumeErr != nil {
+				return fmt.Errorf("create normalization source volume: %w", volumeErr)
+			}
 		}
+		scratch, volumeErr = c.findNormalizationVolume(ctx, projectID, info.SHA256, "image-normalization-scratch", cfg.Normalization.PerformanceClass)
+		if volumeErr != nil {
+			return volumeErr
+		}
+		if scratch == nil {
+			scratch, volumeErr = c.createNormalizationVolume(ctx, projectID, zone, "coriolis-normalization-scratch-"+short, "", cfg.Normalization.PerformanceClass, cfg.Normalization.ScratchSizeGiB, "image-normalization-scratch", info.SHA256)
+			if volumeErr != nil {
+				return fmt.Errorf("create normalization scratch volume: %w", volumeErr)
+			}
+		}
+		return nil
+	}); err != nil {
+		return nil, err
 	}
 
 	existingHelper, err := c.findNormalizationHelper(ctx, projectID, info.SHA256)
@@ -413,59 +443,82 @@ func (c *Cloud) normalizeAndUploadImage(ctx context.Context, projectID string, c
 			err = c.waitServerAgent(ctx, projectID, existingHelper.GetId())
 		}
 		if err == nil && c.normalizedVolumeReady(ctx, projectID, existingHelper.GetId(), source.GetId(), scratch.GetId()) {
-			fmt.Fprintln(os.Stderr, "resuming completed normalization on helper", existingHelper.GetId())
+			writeInfo("resuming completed normalization on helper %s", existingHelper.GetId())
 			image, exportErr := c.exportNormalizedVolume(ctx, projectID, existingHelper.GetId(), source.GetId(), scratch.GetId(), cfg, info)
 			if exportErr != nil {
 				return nil, exportErr
 			}
-			c.cleanupNormalizationResources(ctx, projectID, existingHelper.GetId(), info.SHA256, nil, source.GetId(), scratch.GetId())
+			_ = progressAction(ctx, "Cleaning up temporary normalization resources", func() error {
+				c.cleanupNormalizationResources(ctx, projectID, existingHelper.GetId(), info.SHA256, nil, source.GetId(), scratch.GetId())
+				return nil
+			})
 			return image, nil
 		}
 	}
-	if err := c.removeStaleNormalizationHelpers(ctx, projectID, info.SHA256); err != nil {
-		return nil, err
-	}
-	if err := c.cleanupStaleHelperAccess(ctx, projectID, info.SHA256); err != nil {
-		return nil, fmt.Errorf("clean up stale normalization access: %w", err)
-	}
-	for _, volume := range []*iaas.Volume{source, scratch} {
-		if _, err := c.waitVolumeAvailable(ctx, projectID, volume.GetId()); err != nil {
-			return nil, err
+	if err := progressAction(ctx, "Preparing reusable normalization resources", func() error {
+		if cleanupErr := c.removeStaleNormalizationHelpers(ctx, projectID, info.SHA256); cleanupErr != nil {
+			return cleanupErr
 		}
-	}
-	access, err := c.createHelperSSHAccess(ctx, projectID, info.SHA256)
-	if err != nil {
+		if cleanupErr := c.cleanupStaleHelperAccess(ctx, projectID, info.SHA256); cleanupErr != nil {
+			return fmt.Errorf("clean up stale normalization access: %w", cleanupErr)
+		}
+		for _, volume := range []*iaas.Volume{source, scratch} {
+			if _, waitErr := c.waitVolumeAvailable(ctx, projectID, volume.GetId()); waitErr != nil {
+				return waitErr
+			}
+		}
+		return nil
+	}); err != nil {
 		return nil, err
 	}
-	helper, err := c.createNormalizationHelper(ctx, cfg, projectID, zone, networkID, access.securityID, access.keypairName, source.GetId(), scratch.GetId(), short)
-	if err != nil {
-		c.cleanupHelperSSHAccess(ctx, projectID, access)
-		return nil, fmt.Errorf("create normalization helper: %w", err)
-	}
-	if err := c.assignHelperPublicIP(ctx, projectID, helper.GetId(), networkID, info.SHA256, access); err != nil {
+	var access *helperSSHAccess
+	var helper *iaas.Server
+	var hostKey ssh.PublicKey
+	if err := progressAction(ctx, "Creating and preparing temporary normalization helper", func() error {
+		var helperErr error
+		access, helperErr = c.createHelperSSHAccess(ctx, projectID, info.SHA256)
+		if helperErr != nil {
+			return helperErr
+		}
+		helper, helperErr = c.createNormalizationHelper(ctx, cfg, projectID, zone, networkID, access.securityID, access.keypairName, source.GetId(), scratch.GetId(), short)
+		if helperErr != nil {
+			c.cleanupHelperSSHAccess(ctx, projectID, access)
+			return fmt.Errorf("create normalization helper: %w", helperErr)
+		}
+		if helperErr = c.assignHelperPublicIP(ctx, projectID, helper.GetId(), networkID, info.SHA256, access); helperErr != nil {
+			return helperErr
+		}
+		hostKey, helperErr = c.prepareHelperTransfer(ctx, projectID, helper.GetId(), scratch.GetId())
+		if helperErr != nil {
+			return fmt.Errorf("prepare temporary helper transfer: %w", helperErr)
+		}
+		return nil
+	}); err != nil {
 		return nil, err
 	}
-	hostKey, err := c.prepareHelperTransfer(ctx, projectID, helper.GetId(), scratch.GetId())
-	if err != nil {
-		return nil, fmt.Errorf("prepare temporary helper transfer: %w", err)
-	}
-	fmt.Fprintln(os.Stderr, "streaming vendor VMDK from OVA to temporary helper", access.publicIP)
-	if err := c.uploadOVAToHelper(ctx, access, cfg.OVA, info, hostKey, cfg.UploadAttempts); err != nil {
+	if err := progressAction(ctx, "Streaming vendor VMDK to temporary helper "+access.publicIP, func() error {
+		return c.uploadOVAToHelper(ctx, access, cfg.OVA, info, hostKey, cfg.UploadAttempts)
+	}); err != nil {
 		return nil, err
 	}
 	importScript, err := volumeScript(importVMDKScript, source.GetId(), scratch.GetId())
 	if err != nil {
 		return nil, err
 	}
-	if _, err := c.runShellScript(ctx, projectID, helper.GetId(), importScript); err != nil {
+	if err := progressAction(ctx, "Converting vendor VMDK onto normalization volume", func() error {
+		_, commandErr := c.runShellScript(ctx, projectID, helper.GetId(), importScript)
+		return commandErr
+	}); err != nil {
 		return nil, fmt.Errorf("convert VMDK on temporary helper: %w", err)
 	}
-	fmt.Fprintln(os.Stderr, "normalizing appliance on temporary helper", helper.GetId())
 	normalizeScript, err := volumeScript(normalizeApplianceScript, source.GetId(), scratch.GetId())
 	if err != nil {
 		return nil, err
 	}
-	if _, err := c.runShellScript(ctx, projectID, helper.GetId(), normalizeScript); err != nil {
+	if err := progressAction(ctx, "Injecting STACKIT Server Agent and normalizing appliance", func() error {
+		_, commandErr := c.runShellScript(ctx, projectID, helper.GetId(), normalizeScript)
+		return commandErr
+	}); err != nil {
 		return nil, fmt.Errorf("normalize appliance: %w", err)
 	}
 
@@ -477,7 +530,10 @@ func (c *Cloud) normalizeAndUploadImage(ctx context.Context, projectID string, c
 	// Cleanup is intentionally performed only after the reusable image is
 	// AVAILABLE. On an earlier failure, labelled resources remain resumable and
 	// preserve evidence for diagnosis.
-	c.cleanupNormalizationResources(ctx, projectID, helper.GetId(), info.SHA256, access, source.GetId(), scratch.GetId())
+	_ = progressAction(ctx, "Cleaning up temporary normalization resources", func() error {
+		c.cleanupNormalizationResources(ctx, projectID, helper.GetId(), info.SHA256, access, source.GetId(), scratch.GetId())
+		return nil
+	})
 	return image, nil
 }
 
@@ -493,15 +549,19 @@ func (c *Cloud) exportNormalizedVolume(ctx context.Context, projectID, helperSer
 	if err != nil {
 		return nil, fmt.Errorf("create normalized image: %w", err)
 	}
+	writeInfo("created STACKIT image import %s; uploading data next", imageImport.GetId())
 	uploadB64 := base64.StdEncoding.EncodeToString([]byte(imageImport.GetUploadUrl()))
 	script, err := volumeScript(exportApplianceScript, sourceVolumeID, scratchVolumeID)
 	if err != nil {
 		return nil, err
 	}
 	script = strings.Replace(script, "__UPLOAD_URL_B64__", uploadB64, 1)
-	if _, err := c.runShellScript(ctx, projectID, helperServerID, script); err != nil {
+	if err := progressAction(ctx, "Converting normalized disk and uploading image data", func() error {
+		_, commandErr := c.runShellScript(ctx, projectID, helperServerID, script)
+		return commandErr
+	}); err != nil {
 		if deleteErr := c.api.DefaultAPI.DeleteImage(ctx, projectID, c.region, imageImport.GetId()).Execute(); deleteErr != nil {
-			fmt.Fprintln(os.Stderr, "warning: delete failed normalized image import:", deleteErr)
+			writeWarning("delete failed normalized image import: %v", deleteErr)
 		}
 		return nil, fmt.Errorf("export normalized image: %w", err)
 	}
@@ -518,21 +578,25 @@ func volumeScript(script, sourceVolumeID, scratchVolumeID string) (string, error
 }
 
 func (c *Cloud) waitVolumeDetachedAndDelete(ctx context.Context, projectID, volumeID string) error {
-	for {
-		volume, err := c.api.DefaultAPI.GetVolume(ctx, projectID, c.region, volumeID).Execute()
-		if err != nil {
-			return err
-		}
-		if strings.EqualFold(volume.GetStatus(), "AVAILABLE") {
-			if err := c.api.DefaultAPI.DeleteVolume(ctx, projectID, c.region, volumeID).Execute(); err != nil {
-				return fmt.Errorf("delete temporary volume %s: %w", volumeID, err)
+	return progressActionWithUpdates(ctx, "Waiting for temporary volume "+volumeID+" to detach before deletion", func(update func(string)) error {
+		for {
+			volume, err := c.api.DefaultAPI.GetVolume(ctx, projectID, c.region, volumeID).Execute()
+			if err != nil {
+				return err
 			}
-			return nil
+			status := strings.ToUpper(volume.GetStatus())
+			if status == "AVAILABLE" {
+				if err := c.api.DefaultAPI.DeleteVolume(ctx, projectID, c.region, volumeID).Execute(); err != nil {
+					return fmt.Errorf("delete temporary volume %s: %w", volumeID, err)
+				}
+				return nil
+			}
+			update("current status " + status)
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(c.poll):
+			}
 		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(c.poll):
-		}
-	}
+	})
 }

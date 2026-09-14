@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"time"
 
 	"github.com/stackitcloud/stackit-sdk-go/core/oapierror"
@@ -59,7 +58,7 @@ func (c *Cloud) ensureRunCommandService(ctx context.Context, projectID string) e
 	}
 
 	if state == serviceenablement.SERVICESTATUSSTATE_DISABLED {
-		fmt.Fprintln(os.Stderr, "enabling STACKIT Run Command service in project", projectID)
+		writeInfo("enabling STACKIT Run Command service in project %s", projectID)
 		if err := c.enablement.EnableService(ctx, projectID, runCommandServiceID).Execute(); err != nil {
 			// Another installer may have won the race. Accept the error only when the
 			// service did not transition to an active state.
@@ -91,7 +90,7 @@ func (c *Cloud) ensureRunCommandService(ctx context.Context, projectID string) e
 			return fmt.Errorf("STACKIT Run Command service entered unexpected state %s during activation", state)
 		}
 	}
-	fmt.Fprintln(os.Stderr, "STACKIT Run Command service is enabled")
+	writeInfo("STACKIT Run Command service is enabled")
 	return nil
 }
 

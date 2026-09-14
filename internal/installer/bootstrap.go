@@ -95,21 +95,27 @@ func (c *Cloud) bootstrapAppliance(ctx context.Context, cfg Config, serverID, fq
 	// The command output contains the initial password; do not stream it to
 	// stderr. It is returned only in the structured final result when requested.
 	var output string
-	var err error
-	for attempt := 1; attempt <= 3; attempt++ {
-		output, err = c.runShellScriptWithOutput(ctx, c.project, serverID, buildAgentBootstrapScript(cfg, fqdn), false)
-		if err == nil {
-			break
+	err := progressAction(ctx, "Waiting for Coriolis services and applying appliance configuration", func() error {
+		var commandErr error
+		for attempt := 1; attempt <= 3; attempt++ {
+			output, commandErr = c.runShellScriptWithOutput(ctx, c.project, serverID, buildAgentBootstrapScript(cfg, fqdn), false)
+			if commandErr == nil {
+				return nil
+			}
+			if !retryableCommandError(commandErr) || attempt == 3 {
+				return commandErr
+			}
+			writeInfo("retrying idempotent appliance bootstrap after transient run-command failure (attempt %d/3)", attempt+1)
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(c.poll):
+			}
 		}
-		if !retryableCommandError(err) || attempt == 3 {
-			return "", err
-		}
-		writeStatus("retrying idempotent appliance bootstrap after transient run-command failure (attempt %d/3)\n", attempt+1)
-		select {
-		case <-ctx.Done():
-			return "", ctx.Err()
-		case <-time.After(c.poll):
-		}
+		return commandErr
+	})
+	if err != nil {
+		return "", err
 	}
 	for _, line := range strings.Split(output, "\n") {
 		if !strings.HasPrefix(line, "CORIOLIS_ADMIN_PASSWORD_B64=") {

@@ -165,12 +165,34 @@ Jede Deployment-Phase schreibt ihren Status nach stderr:
 [DONE ] Finding or creating Coriolis appliance server (elapsed 53s)
 ```
 
-Wenn keine andere sichtbare Aktivität stattfindet, erscheint alle 20 Sekunden ein
-Heartbeat. Fehler verwenden `[FAIL ]` und zeigen die verstrichene Zeit, bevor der
-detaillierte Fehler zurückgegeben wird. Die vorhandenen Prozentanzeigen für den
-VMDK-Transfer und den Image-Upload bleiben aktiv und unterdrücken während eines
-laufenden Datentransfers redundante Heartbeats. Fortschrittsmeldungen gehen nach
-stderr; das maschinenlesbare JSON-Endergebnis bleibt unverändert auf stdout.
+Lange Phasen werden in eindeutige Teilphasen zerlegt. Eine Abschlussmeldung gilt
+immer nur für die zugehörige Startmeldung und bedeutet nicht automatisch, dass das
+gesamte Deployment fertig ist. Nach dem abgeschlossenen Datenupload beginnt daher
+beispielsweise sofort sichtbar die separate Verarbeitung durch die STACKIT
+Control-Plane:
+
+```text
+[INFO ] Image data upload completed; STACKIT control-plane image processing follows
+[DONE ] Converting normalized disk and uploading image data (elapsed 18m12s)
+[START] Waiting for STACKIT image 8c405fdd-... to become AVAILABLE
+[INFO ] Waiting for STACKIT image 8c405fdd-... to become AVAILABLE: current status CREATING (elapsed 1s)
+[WAIT ] Waiting for STACKIT image 8c405fdd-... to become AVAILABLE: current status CREATING (elapsed 40s)
+[DONE ] Waiting for STACKIT image 8c405fdd-... to become AVAILABLE (elapsed 20m3s)
+```
+
+Wenn keine andere sichtbare Aktivität stattfindet, meldet sich alle 20 Sekunden die
+aktuell aktive und spezifischste Teilphase. Beim Polling werden außerdem
+Statusänderungen wie `CREATING`, `ATTACHED` oder `ACTIVE` angezeigt. Fehler verwenden
+`[FAIL ]`; Hinweise und behebbare Bereinigungsprobleme erscheinen als `[INFO ]`
+beziehungsweise `[WARN ]`. Die vorhandenen Prozentanzeigen für VMDK-Transfer und
+Image-Upload bleiben aktiv und unterdrücken während eines Datentransfers redundante
+Heartbeats. Erst `[DONE ] Deploying Coriolis appliance` bedeutet, dass das gesamte
+Deployment abgeschlossen ist.
+
+Alle Fortschrittsmeldungen gehen nach stderr; das maschinenlesbare JSON-Endergebnis
+bleibt auf stdout. Sensible Bootstrap-Ausgaben einschließlich des Appliance-Passworts
+werden nicht allein für eine Fortschrittsanzeige ausgegeben. Während solcher Befehle
+bleiben stattdessen sichere Heartbeats sichtbar.
 
 ## Technische Voraussetzungen
 

@@ -70,3 +70,59 @@ func TestProgressActionSuppressesHeartbeatDuringVisibleProgress(t *testing.T) {
 		t.Fatalf("unexpected heartbeat during visible progress: %q", output.String())
 	}
 }
+
+func TestProgressActionReportsAndRepeatsCurrentDetail(t *testing.T) {
+	oldOutput, oldInterval := progressOutput, progressHeartbeatInterval
+	defer func() {
+		progressOutput = oldOutput
+		progressHeartbeatInterval = oldInterval
+	}()
+	var output bytes.Buffer
+	progressOutput = &output
+	progressHeartbeatInterval = 5 * time.Millisecond
+
+	err := progressActionWithUpdates(context.Background(), "waiting for resource", func(update func(string)) error {
+		update("current status CREATING")
+		update("current status CREATING")
+		time.Sleep(18 * time.Millisecond)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := output.String()
+	if strings.Count(got, "[INFO ] waiting for resource: current status CREATING") != 1 {
+		t.Fatalf("detail update should be emitted once, got %q", got)
+	}
+	if !strings.Contains(got, "[WAIT ] waiting for resource: current status CREATING") {
+		t.Fatalf("heartbeat does not include current detail: %q", got)
+	}
+}
+
+func TestNestedProgressOnlyHeartbeatsForMostSpecificActivity(t *testing.T) {
+	oldOutput, oldInterval := progressOutput, progressHeartbeatInterval
+	defer func() {
+		progressOutput = oldOutput
+		progressHeartbeatInterval = oldInterval
+	}()
+	var output bytes.Buffer
+	progressOutput = &output
+	progressHeartbeatInterval = 5 * time.Millisecond
+
+	err := progressAction(context.Background(), "outer operation", func() error {
+		return progressAction(context.Background(), "specific inner operation", func() error {
+			time.Sleep(18 * time.Millisecond)
+			return nil
+		})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := output.String()
+	if strings.Contains(got, "[WAIT ] outer operation") {
+		t.Fatalf("outer heartbeat obscures the active inner phase: %q", got)
+	}
+	if !strings.Contains(got, "[WAIT ] specific inner operation") {
+		t.Fatalf("specific inner heartbeat is missing: %q", got)
+	}
+}

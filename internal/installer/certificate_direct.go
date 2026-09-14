@@ -405,7 +405,7 @@ func (c *Cloud) ensureDirectCertificate(ctx context.Context, cfg CertificateConf
 		return fmt.Errorf("inspect appliance certificate: %w", err)
 	}
 	if strings.Contains(probe, "CERTIFICATE_CURRENT") {
-		writeStatus("appliance certificate is current\n")
+		writeInfo("appliance certificate is current")
 		return nil
 	}
 	staged, err := c.runShellScriptWithOutput(ctx, c.project, serverID, certificateStagedProbeScript(fqdn, cfg.RenewBeforeDays), false)
@@ -413,7 +413,7 @@ func (c *Cloud) ensureDirectCertificate(ctx context.Context, cfg CertificateConf
 		return fmt.Errorf("inspect staged appliance certificate: %w", err)
 	}
 	if strings.Contains(staged, "STAGED_CERTIFICATE_READY") {
-		writeStatus("reusing valid staged appliance certificate\n")
+		writeInfo("reusing valid staged appliance certificate")
 	} else {
 		csrOutput, err := c.runShellScriptWithOutput(ctx, c.project, serverID, certificateCSRScript(fqdn), false)
 		if err != nil {
@@ -433,35 +433,49 @@ func (c *Cloud) ensureDirectCertificate(ctx context.Context, cfg CertificateConf
 		if !coversFQDN {
 			return fmt.Errorf("appliance CSR does not cover %s", fqdn)
 		}
-		writeStatus("requesting trusted appliance certificate for %s\n", fqdn)
-		issued, err := c.obtainCertificateForCSR(ctx, cfg, zoneID, fqdn, csr)
-		if err != nil {
+		var certificate, issuerCertificate []byte
+		if err := progressAction(ctx, "Obtaining trusted certificate through ACME DNS-01", func() error {
+			issued, issueErr := c.obtainCertificateForCSR(ctx, cfg, zoneID, fqdn, csr)
+			if issueErr != nil {
+				return issueErr
+			}
+			if len(issued.Certificate) == 0 || len(issued.IssuerCertificate) == 0 {
+				return fmt.Errorf("ACME returned incomplete certificate material")
+			}
+			certificate = issued.Certificate
+			issuerCertificate = issued.IssuerCertificate
+			return nil
+		}); err != nil {
 			return err
 		}
-		if len(issued.Certificate) == 0 || len(issued.IssuerCertificate) == 0 {
-			return fmt.Errorf("ACME returned incomplete certificate material")
-		}
-		for name, contents := range map[string][]byte{"server.pem": issued.Certificate, "issuer.pem": issued.IssuerCertificate} {
-			if _, err := c.runShellScriptWithOutput(ctx, c.project, serverID, certificateStageFileScript(name, contents), false); err != nil {
-				return fmt.Errorf("stage %s on appliance: %w", name, err)
+		if err := progressAction(ctx, "Staging trusted certificate on appliance", func() error {
+			for name, contents := range map[string][]byte{"server.pem": certificate, "issuer.pem": issuerCertificate} {
+				if _, stageErr := c.runShellScriptWithOutput(ctx, c.project, serverID, certificateStageFileScript(name, contents), false); stageErr != nil {
+					return fmt.Errorf("stage %s on appliance: %w", name, stageErr)
+				}
 			}
+			return nil
+		}); err != nil {
+			return err
 		}
 	}
-	applyOutput, err := c.runShellScriptWithOutput(ctx, c.project, serverID, certificateApplyScript(fqdn), false)
-	if err != nil {
+	return progressAction(ctx, "Applying trusted certificate and reconfiguring Coriolis services", func() error {
+		applyOutput, applyErr := c.runShellScriptWithOutput(ctx, c.project, serverID, certificateApplyScript(fqdn), false)
+		if applyErr == nil {
+			return nil
+		}
 		// The control plane can report an unknown terminal status although the
 		// script completed. Confirm actual state before declaring failure.
-		if retryableCommandError(err) {
+		if retryableCommandError(applyErr) {
 			confirmed, confirmErr := c.runShellScriptWithOutput(ctx, c.project, serverID, certificateProbeScript(fqdn, cfg.RenewBeforeDays), false)
 			if confirmErr == nil && strings.Contains(confirmed, "CERTIFICATE_CURRENT") {
-				writeStatus("appliance certificate installation confirmed after an ambiguous run-command status\n")
+				writeInfo("appliance certificate installation confirmed after an ambiguous run-command status")
 				return nil
 			}
 		}
 		if summary := certificateFailureSummary(applyOutput); summary != "" {
-			return fmt.Errorf("install appliance certificate (%s): %w", summary, err)
+			return fmt.Errorf("install appliance certificate (%s): %w", summary, applyErr)
 		}
-		return fmt.Errorf("install appliance certificate: %w", err)
-	}
-	return nil
+		return fmt.Errorf("install appliance certificate: %w", applyErr)
+	})
 }

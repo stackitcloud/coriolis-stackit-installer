@@ -164,12 +164,32 @@ Every deployment phase writes a status line to stderr:
 [DONE ] Finding or creating Coriolis appliance server (elapsed 53s)
 ```
 
-When no other visible progress is produced, a heartbeat is printed every 20
-seconds. Failures use `[FAIL ]` and include the elapsed time before the detailed
-error is returned. Existing percentage displays for VMDK transfer and image upload
-remain active; they suppress redundant heartbeat lines while data is moving.
-Progress goes to stderr, while the final machine-readable JSON result remains on
-stdout.
+Long phases are split into explicit subphases. A completion line always refers only
+to the matching start line; it does not mean that the complete deployment has
+finished. For example, completing the byte upload is immediately followed by the
+separate STACKIT control-plane import phase:
+
+```text
+[INFO ] Image data upload completed; STACKIT control-plane image processing follows
+[DONE ] Converting normalized disk and uploading image data (elapsed 18m12s)
+[START] Waiting for STACKIT image 8c405fdd-... to become AVAILABLE
+[INFO ] Waiting for STACKIT image 8c405fdd-... to become AVAILABLE: current status CREATING (elapsed 1s)
+[WAIT ] Waiting for STACKIT image 8c405fdd-... to become AVAILABLE: current status CREATING (elapsed 40s)
+[DONE ] Waiting for STACKIT image 8c405fdd-... to become AVAILABLE (elapsed 20m3s)
+```
+
+When no other visible progress is produced, the currently active and most specific
+subphase prints a heartbeat every 20 seconds. Resource polling also reports status
+changes such as `CREATING`, `ATTACHED`, or `ACTIVE`. Failures use `[FAIL ]`; notices
+and recoverable cleanup problems use `[INFO ]` and `[WARN ]`. Existing percentage
+displays for VMDK transfer and image upload remain active and suppress redundant
+heartbeat lines while data is moving. Only the final line
+`[DONE ] Deploying Coriolis appliance` means that the complete deployment finished.
+
+All progress goes to stderr, while the final machine-readable JSON result remains
+on stdout. Sensitive bootstrap command output, including the appliance password,
+is never streamed merely to provide progress; safe heartbeats remain visible while
+that command runs.
 
 ## Technical prerequisites
 

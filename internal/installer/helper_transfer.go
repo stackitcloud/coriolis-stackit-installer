@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -208,11 +207,18 @@ printf 'HELPER_HOST_KEY_B64='
 base64 -w0 /etc/ssh/ssh_host_ed25519_key.pub
 printf '\nHELPER_TRANSFER_READY\n'
 `, "__SCRATCH_SERIAL__", scratchVolumeID[:20])
-	output, err := c.runShellScript(ctx, projectID, serverID, script)
+	// The command output contains the pinned host key used internally by the
+	// installer. Keep that machine-readable value out of the user-facing log.
+	output, err := c.runShellScriptWithOutput(ctx, projectID, serverID, script, false)
 	if err != nil {
 		return nil, err
 	}
-	return parseHelperHostKey(output)
+	hostKey, err := parseHelperHostKey(output)
+	if err != nil {
+		return nil, err
+	}
+	writeInfo("temporary helper transfer endpoint is ready and its SSH host key is pinned")
+	return hostKey, nil
 }
 
 func dialPinnedSSH(ctx context.Context, address string, signer ssh.Signer, hostKey ssh.PublicKey) (*ssh.Client, error) {
@@ -270,7 +276,7 @@ func (c *Cloud) uploadOVAToHelper(ctx context.Context, access *helperSSHAccess, 
 		status := strings.TrimSpace(string(statusOutput))
 		if status == "COMPLETE" {
 			client.Close()
-			fmt.Fprintln(os.Stderr, "VMDK is already completely staged on temporary helper")
+			writeInfo("VMDK is already completely staged on temporary helper")
 			return nil
 		}
 		offset, err := strconv.ParseInt(status, 10, 64)
@@ -292,7 +298,7 @@ func (c *Cloud) uploadOVAToHelper(ctx context.Context, access *helperSSHAccess, 
 			return err
 		}
 		if offset > 0 {
-			fmt.Fprintf(os.Stderr, "resuming helper upload at %.2f GiB\n", float64(offset)/(1024*1024*1024))
+			writeInfo("resuming helper upload at %.2f GiB", float64(offset)/(1024*1024*1024))
 			if _, err := io.CopyN(io.Discard, disk, offset); err != nil {
 				disk.Close()
 				client.Close()
@@ -331,7 +337,7 @@ func (c *Cloud) uploadOVAToHelper(ctx context.Context, access *helperSSHAccess, 
 		}
 		last = err
 		if attempt < attempts {
-			fmt.Fprintln(os.Stderr, "temporary helper upload failed; retrying from the beginning:", err)
+			writeWarning("temporary helper upload failed; retrying from the beginning: %v", err)
 		}
 	}
 	return fmt.Errorf("upload OVA disk to temporary helper: %w", last)
@@ -343,17 +349,17 @@ func (c *Cloud) cleanupHelperSSHAccess(ctx context.Context, projectID string, ac
 	}
 	if access.publicIPID != "" {
 		if err := c.api.DefaultAPI.DeletePublicIP(ctx, projectID, c.region, access.publicIPID).Execute(); err != nil {
-			fmt.Fprintln(os.Stderr, "warning: delete temporary helper public IP:", err)
+			writeWarning("delete temporary helper public IP: %v", err)
 		}
 	}
 	if access.keypairName != "" {
 		if err := c.api.DefaultAPI.DeleteKeyPair(ctx, access.keypairName).Execute(); err != nil {
-			fmt.Fprintln(os.Stderr, "warning: delete temporary helper keypair:", err)
+			writeWarning("delete temporary helper keypair: %v", err)
 		}
 	}
 	if access.securityID != "" {
 		if err := c.api.DefaultAPI.DeleteSecurityGroup(ctx, projectID, c.region, access.securityID).Execute(); err != nil {
-			fmt.Fprintln(os.Stderr, "warning: delete temporary helper security group:", err)
+			writeWarning("delete temporary helper security group: %v", err)
 		}
 	}
 }

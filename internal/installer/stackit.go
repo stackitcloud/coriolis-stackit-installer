@@ -8,7 +8,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"os"
 	"sort"
 	"strings"
 	"time"
@@ -84,7 +83,7 @@ func (c *Cloud) waitRunCommand(ctx context.Context, projectID, serverID, id stri
 			}
 			consecutiveErrors++
 			if consecutiveErrors == 1 || consecutiveErrors%6 == 0 {
-				fmt.Fprintf(os.Stderr, "warning: transient error polling run command %s (attempt %d): %v\n", id, consecutiveErrors, err)
+				writeWarning("transient error polling run command %s (attempt %d): %v", id, consecutiveErrors, err)
 			}
 			select {
 			case <-ctx.Done():
@@ -95,13 +94,12 @@ func (c *Cloud) waitRunCommand(ctx context.Context, projectID, serverID, id stri
 		}
 		consecutiveErrors = 0
 		if output := command.GetOutput(); output != lastOutput {
-			markVisibleProgress()
 			if streamOutput && output != "" {
-				if strings.HasPrefix(output, lastOutput) {
-					fmt.Fprint(os.Stderr, output[len(lastOutput):])
-				} else {
-					fmt.Fprint(os.Stderr, output)
+				delta, reset := commandOutputDelta(lastOutput, output)
+				if reset {
+					writeWarning("remote command output window changed; continuing with its latest output")
 				}
+				writeProgressOutput(delta)
 			}
 			lastOutput = output
 		}
@@ -127,6 +125,37 @@ func (c *Cloud) waitRunCommand(ctx context.Context, projectID, serverID, id stri
 		case <-time.After(c.poll):
 		}
 	}
+}
+
+func commandOutputDelta(previous, current string) (delta string, reset bool) {
+	if previous == "" || strings.HasPrefix(current, previous) {
+		return current[len(previous):], false
+	}
+	// Run Command responses can switch from a growing buffer to a rolling
+	// window once their output limit is reached. Find the overlap so progress
+	// bars and remote status lines are not printed repeatedly on every poll.
+	probeLength := min(64, len(current))
+	if probeLength > 0 {
+		probe := current[:probeLength]
+		searchEnd := len(previous)
+		for searchEnd > 0 {
+			index := strings.LastIndex(previous[:searchEnd], probe)
+			if index < 0 {
+				break
+			}
+			overlap := len(previous) - index
+			if overlap <= len(current) && previous[index:] == current[:overlap] {
+				return current[overlap:], false
+			}
+			searchEnd = index
+		}
+	}
+	for overlap := min(63, min(len(previous), len(current))); overlap > 0; overlap-- {
+		if previous[len(previous)-overlap:] == current[:overlap] {
+			return current[overlap:], false
+		}
+	}
+	return current, true
 }
 
 func transientAPIError(err error) bool {
@@ -172,7 +201,7 @@ func (c *Cloud) resolveImage(ctx context.Context, projectID, imageID, sha string
 		return nil, fmt.Errorf("configured image %s belongs to a different OVA (label coriolis-sha256=%s)", imageID, label)
 	}
 	if !labelsMatch(im.Labels, sha) {
-		fmt.Fprintln(os.Stderr, "warning: configured image has no matching coriolis-sha256 label; using it because image.id was explicitly set")
+		writeWarning("configured image has no matching coriolis-sha256 label; using it because image.id was explicitly set")
 	}
 	return im, nil
 }
@@ -236,13 +265,12 @@ func (c *Cloud) ensureImage(ctx context.Context, cfg Config, info OVAInfo, zone,
 	}
 	if image != nil && strings.EqualFold(image.GetStatus(), "CREATING") {
 		if updated := image.GetUpdatedAt(); !updated.IsZero() && time.Since(updated) > 30*time.Minute && image.GetOwner() == ownerProject {
-			fmt.Fprintln(os.Stderr, "removing stale incomplete image import", image.GetId())
+			writeInfo("removing stale incomplete image import %s", image.GetId())
 			if err := c.api.DefaultAPI.DeleteImage(ctx, ownerProject, c.region, image.GetId()).Execute(); err != nil {
 				return nil, fmt.Errorf("delete stale image import %s: %w", image.GetId(), err)
 			}
 			image = nil
 		} else {
-			fmt.Fprintln(os.Stderr, "waiting for existing image", image.GetId())
 			image, err = c.waitImage(ctx, image.GetOwner(), image.GetId())
 			if err != nil {
 				return nil, err
@@ -259,13 +287,13 @@ func (c *Cloud) ensureImage(ctx context.Context, cfg Config, info OVAInfo, zone,
 				return nil, fmt.Errorf("ensure normalization network in image owner project: %w", err)
 			}
 		}
-		fmt.Fprintln(os.Stderr, "streaming and normalizing OVA with a temporary STACKIT helper in project", ownerProject)
+		writeInfo("a reusable normalized image was not found; starting normalization in project %s", ownerProject)
 		image, err = c.normalizeAndUploadImage(ctx, ownerProject, cfg, info, zone, helperNetworkID)
 		if err != nil {
 			return nil, err
 		}
 	} else {
-		fmt.Fprintln(os.Stderr, "reusing image", image.GetId(), "owned by", image.GetOwner())
+		writeInfo("reusing image %s owned by %s", image.GetId(), image.GetOwner())
 	}
 	if cfg.Agent.Enabled && fmt.Sprint(image.Labels["coriolis-normalized"]) != "agent-v2" {
 		return nil, fmt.Errorf("image %s is not normalized for automated management (expected coriolis-normalized=agent-v2)", image.GetId())
@@ -316,7 +344,7 @@ func (c *Cloud) ensureImageShare(ctx context.Context, ownerProject, imageID stri
 		if _, err := c.api.DefaultAPI.UpdateImageShare(ctx, ownerProject, c.region, imageID).UpdateImageSharePayload(*payload).Execute(); err != nil {
 			return fmt.Errorf("share image with parent organization: %w", err)
 		}
-		fmt.Fprintln(os.Stderr, "shared image", imageID, "with parent organization")
+		writeInfo("shared image %s with parent organization", imageID)
 		return nil
 	}
 	existing := make(map[string]bool, len(current.GetProjects()))
@@ -337,22 +365,33 @@ func (c *Cloud) ensureImageShare(ctx context.Context, ownerProject, imageID stri
 	if _, err := c.api.DefaultAPI.UpdateImageShare(ctx, ownerProject, c.region, imageID).UpdateImageSharePayload(*payload).Execute(); err != nil {
 		return fmt.Errorf("share image with projects: %w", err)
 	}
-	fmt.Fprintln(os.Stderr, "shared image", imageID, "with projects", strings.Join(missing, ","))
+	writeInfo("shared image %s with projects %s", imageID, strings.Join(missing, ","))
 	return nil
 }
 
 func (c *Cloud) waitImageVisible(ctx context.Context, imageID string) (*iaas.Image, error) {
-	for {
-		im, err := c.api.DefaultAPI.GetImage(ctx, c.project, c.region, imageID).Execute()
-		if err == nil && strings.EqualFold(im.GetStatus(), "AVAILABLE") {
-			return im, nil
+	var visible *iaas.Image
+	err := progressActionWithUpdates(ctx, "Waiting for shared image "+imageID+" to become visible in the target project", func(update func(string)) error {
+		for {
+			im, err := c.api.DefaultAPI.GetImage(ctx, c.project, c.region, imageID).Execute()
+			if err == nil {
+				status := strings.ToUpper(im.GetStatus())
+				if status == "AVAILABLE" {
+					visible = im
+					return nil
+				}
+				update("current status " + status)
+			} else {
+				update("not visible yet")
+			}
+			select {
+			case <-ctx.Done():
+				return fmt.Errorf("wait for shared image %s in target project: %w", imageID, ctx.Err())
+			case <-time.After(c.poll):
+			}
 		}
-		select {
-		case <-ctx.Done():
-			return nil, fmt.Errorf("wait for shared image %s in target project: %w", imageID, ctx.Err())
-		case <-time.After(c.poll):
-		}
-	}
+	})
+	return visible, err
 }
 
 func uniqueStrings(values []string) []string {
@@ -411,24 +450,30 @@ func (r *progressReader) report(done bool) {
 }
 
 func (c *Cloud) waitImage(ctx context.Context, projectID, id string) (*iaas.Image, error) {
-	for {
-		im, err := c.api.DefaultAPI.GetImage(ctx, projectID, c.region, id).Execute()
-		if err != nil {
-			return nil, err
+	var available *iaas.Image
+	err := progressActionWithUpdates(ctx, "Waiting for STACKIT image "+id+" to become AVAILABLE", func(update func(string)) error {
+		for {
+			im, err := c.api.DefaultAPI.GetImage(ctx, projectID, c.region, id).Execute()
+			if err != nil {
+				return err
+			}
+			s := strings.ToUpper(im.GetStatus())
+			if s == "AVAILABLE" {
+				available = im
+				return nil
+			}
+			update("current status " + s)
+			if s == "ERROR" || s == "DELETED" {
+				return fmt.Errorf("image %s entered status %s", id, s)
+			}
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(c.poll):
+			}
 		}
-		s := strings.ToUpper(im.GetStatus())
-		if s == "AVAILABLE" {
-			return im, nil
-		}
-		if s == "ERROR" || s == "DELETED" {
-			return nil, fmt.Errorf("image %s entered status %s", id, s)
-		}
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-time.After(c.poll):
-		}
-	}
+	})
+	return available, err
 }
 
 func (c *Cloud) chooseZone(ctx context.Context, preferred string) (string, error) {
@@ -610,7 +655,7 @@ func (c *Cloud) ensureServer(ctx context.Context, cfg Config, imageID, zone, mac
 				return nil, false, err
 			}
 		}
-		fmt.Fprintln(os.Stderr, "adopting existing server", s.GetId(), "without changing its boot volume")
+		writeInfo("adopting existing server %s without changing its boot volume", s.GetId())
 		return s, false, nil
 	}
 	r, err := c.api.DefaultAPI.ListServers(ctx, c.project, c.region).Execute()
@@ -763,22 +808,28 @@ func (c *Cloud) ensurePublicIP(ctx context.Context, serverID, networkID, request
 }
 
 func (c *Cloud) waitServer(ctx context.Context, id string) (*iaas.Server, error) {
-	for {
-		s, err := c.api.DefaultAPI.GetServer(ctx, c.project, c.region, id).Execute()
-		if err != nil {
-			return nil, err
+	var active *iaas.Server
+	err := progressActionWithUpdates(ctx, "Waiting for STACKIT server "+id+" to become ACTIVE", func(update func(string)) error {
+		for {
+			s, err := c.api.DefaultAPI.GetServer(ctx, c.project, c.region, id).Execute()
+			if err != nil {
+				return err
+			}
+			st := strings.ToUpper(s.GetStatus())
+			if st == "ACTIVE" {
+				active = s
+				return nil
+			}
+			update("current status " + st)
+			if st == "ERROR" || st == "DELETED" {
+				return fmt.Errorf("server %s entered status %s", id, st)
+			}
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(c.poll):
+			}
 		}
-		st := strings.ToUpper(s.GetStatus())
-		if st == "ACTIVE" {
-			return s, nil
-		}
-		if st == "ERROR" || st == "DELETED" {
-			return nil, fmt.Errorf("server %s entered status %s", id, st)
-		}
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-time.After(c.poll):
-		}
-	}
+	})
+	return active, err
 }

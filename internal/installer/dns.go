@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
@@ -102,7 +101,7 @@ func (c *Cloud) ensureDNSZoneWithClient(ctx context.Context, client *dns.APIClie
 		}
 		z := created.GetZone()
 		zone = &z
-		fmt.Fprintln(os.Stderr, "created DNS zone", zone.DnsName, zone.Id)
+		writeInfo("created DNS zone %s (%s)", zone.DnsName, zone.Id)
 	}
 	if zone == nil {
 		var available []string
@@ -111,18 +110,27 @@ func (c *Cloud) ensureDNSZoneWithClient(ctx context.Context, client *dns.APIClie
 		}
 		return nil, fmt.Errorf("DNS zone %q not found; available zones: %s", cfg.ZoneName, strings.Join(available, ", "))
 	}
-	for zone.State == dns.ZONESTATE_CREATING || zone.State == dns.ZONESTATE_UPDATING {
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-time.After(5 * time.Second):
-		}
-		response, err := client.DefaultAPI.GetZone(ctx, c.project, zone.Id).Execute()
+	if zone.State == dns.ZONESTATE_CREATING || zone.State == dns.ZONESTATE_UPDATING {
+		err := progressActionWithUpdates(ctx, "Waiting for DNS zone "+zone.DnsName+" to become active", func(update func(string)) error {
+			for zone.State == dns.ZONESTATE_CREATING || zone.State == dns.ZONESTATE_UPDATING {
+				update("current status " + string(zone.State))
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-time.After(5 * time.Second):
+				}
+				response, getErr := client.DefaultAPI.GetZone(ctx, c.project, zone.Id).Execute()
+				if getErr != nil {
+					return getErr
+				}
+				z := response.GetZone()
+				zone = &z
+			}
+			return nil
+		})
 		if err != nil {
 			return nil, err
 		}
-		z := response.GetZone()
-		zone = &z
 	}
 	if zone.State == dns.ZONESTATE_CREATE_FAILED || zone.State == dns.ZONESTATE_UPDATE_FAILED {
 		return nil, fmt.Errorf("DNS zone %q is in state %s: %s", zone.DnsName, zone.State, zone.GetError())

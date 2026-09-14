@@ -166,23 +166,29 @@ func albUsesCertificate(lb *alb.LoadBalancer, certificateID string) bool {
 }
 
 func waitALB(ctx context.Context, client *alb.APIClient, project, region, name string, current *alb.LoadBalancer, poll time.Duration) (*alb.LoadBalancer, error) {
-	for {
-		status := current.GetStatus()
-		if status == alb.LOADBALANCERSTATUS_STATUS_READY {
-			return current, nil
+	var ready *alb.LoadBalancer
+	err := progressActionWithUpdates(ctx, "Waiting for Application Load Balancer "+name+" to become READY", func(update func(string)) error {
+		for {
+			status := current.GetStatus()
+			if status == alb.LOADBALANCERSTATUS_STATUS_READY {
+				ready = current
+				return nil
+			}
+			if status == alb.LOADBALANCERSTATUS_STATUS_ERROR {
+				return fmt.Errorf("ALB %s entered error state: %v", name, current.GetErrors())
+			}
+			update("current status " + string(status))
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(poll):
+			}
+			var err error
+			current, err = client.DefaultAPI.GetLoadBalancer(ctx, project, region, name).Execute()
+			if err != nil {
+				return err
+			}
 		}
-		if status == alb.LOADBALANCERSTATUS_STATUS_ERROR {
-			return nil, fmt.Errorf("ALB %s entered error state: %v", name, current.GetErrors())
-		}
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-time.After(poll):
-		}
-		var err error
-		current, err = client.DefaultAPI.GetLoadBalancer(ctx, project, region, name).Execute()
-		if err != nil {
-			return nil, err
-		}
-	}
+	})
+	return ready, err
 }

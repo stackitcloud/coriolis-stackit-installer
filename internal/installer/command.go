@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	serviceenablement "github.com/stackitcloud/stackit-sdk-go/services/serviceenablement/v1api"
 )
@@ -21,7 +22,7 @@ type result struct {
 }
 
 // Run executes the installer command with the supplied build version.
-func Run(args []string, version string) error {
+func Run(args []string, version string) (runErr error) {
 	fs := flag.NewFlagSet("coriolis-stackit", flag.ContinueOnError)
 	configPath := fs.String("config", "", "YAML configuration file")
 	project := fs.String("project-id", "", "STACKIT project ID")
@@ -178,7 +179,7 @@ func Run(args []string, version string) error {
 	if st, err := os.Stat(c.Credentials); err != nil {
 		return fmt.Errorf("credentials: %w", err)
 	} else if st.Mode().Perm()&0077 != 0 {
-		fmt.Fprintln(os.Stderr, "warning: credentials file is readable by group/others; chmod 600 is recommended")
+		writeWarning("credentials file is readable by group/others; chmod 600 is recommended")
 	}
 	var info OVAInfo
 	if err := progressAction(context.Background(), "Inspecting OVA and calculating SHA-256", func() error {
@@ -223,7 +224,7 @@ func Run(args []string, version string) error {
 					if !c.Agent.EnableService {
 						return fmt.Errorf("STACKIT Run Command service is %s and automatic activation is disabled", state)
 					}
-					fmt.Fprintf(os.Stderr, "STACKIT Run Command service is %s; deployment will enable it automatically\n", state)
+					writeInfo("STACKIT Run Command service is %s; deployment will enable it automatically", state)
 				}
 			}
 			var checkErr error
@@ -248,6 +249,15 @@ func Run(args []string, version string) error {
 		}
 		return printJSON(result{ProjectID: c.ProjectID, Region: c.Region, AvailabilityZone: zoneResolved, MachineType: machineResolved, OVAHash: info.SHA256})
 	}
+	deploymentStarted := time.Now()
+	writeProgress("START", "Deploying Coriolis appliance", 0)
+	defer func() {
+		state := "DONE "
+		if runErr != nil {
+			state = "FAIL "
+		}
+		writeProgress(state, "Deploying Coriolis appliance", time.Since(deploymentStarted))
+	}()
 	if c.Agent.Enabled {
 		if err := progressAction(ctx, "Ensuring STACKIT Run Command service", func() error {
 			if c.Agent.EnableService {
