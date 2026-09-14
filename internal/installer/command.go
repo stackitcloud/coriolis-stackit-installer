@@ -206,7 +206,9 @@ func Run(args []string, version string) (runErr error) {
 			OVA    OVAInfo `json:"ova"`
 		}{c, info})
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), c.Timeout)
+	// The configured timeout applies independently to each major phase. A
+	// first-time image import must not exhaust the budget needed by bootstrap.
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	cloud, err := newCloud(c, ctx)
 	if err != nil {
@@ -214,9 +216,9 @@ func Run(args []string, version string) (runErr error) {
 	}
 	if *checkCloud {
 		var zoneResolved, machineResolved string
-		if err := progressAction(ctx, "Running read-only STACKIT cloud checks", func() error {
+		if err := deploymentPhase(ctx, c.Timeout, "Running read-only STACKIT cloud checks", func(phaseCtx context.Context) error {
 			if c.Agent.Enabled {
-				state, checkErr := cloud.runCommandServiceState(ctx, c.ProjectID)
+				state, checkErr := cloud.runCommandServiceState(phaseCtx, c.ProjectID)
 				if checkErr != nil {
 					return fmt.Errorf("check Run Command service: %w", checkErr)
 				}
@@ -228,21 +230,21 @@ func Run(args []string, version string) (runErr error) {
 				}
 			}
 			var checkErr error
-			zoneResolved, checkErr = cloud.chooseZone(ctx, c.Server.AvailabilityZone)
+			zoneResolved, checkErr = cloud.chooseZone(phaseCtx, c.Server.AvailabilityZone)
 			if checkErr != nil {
 				return checkErr
 			}
 			if c.DNS.Enabled {
-				if checkErr := cloud.checkDNSZone(ctx, c.DNS); checkErr != nil {
+				if checkErr := cloud.checkDNSZone(phaseCtx, c.DNS); checkErr != nil {
 					return checkErr
 				}
 			}
 			if c.Exposure.Mode == "application_load_balancer" {
-				if checkErr := cloud.checkALBAccess(ctx, c.Exposure.LoadBalancer); checkErr != nil {
+				if checkErr := cloud.checkALBAccess(phaseCtx, c.Exposure.LoadBalancer); checkErr != nil {
 					return checkErr
 				}
 			}
-			machineResolved, checkErr = cloud.validateMachineType(ctx, c.Server.MachineType, info.VCPUs, info.MemoryMiB)
+			machineResolved, checkErr = cloud.validateMachineType(phaseCtx, c.Server.MachineType, info.VCPUs, info.MemoryMiB)
 			return checkErr
 		}); err != nil {
 			return err
@@ -259,31 +261,31 @@ func Run(args []string, version string) (runErr error) {
 		writeProgress(state, "Deploying Coriolis appliance", time.Since(deploymentStarted))
 	}()
 	if c.Agent.Enabled {
-		if err := progressAction(ctx, "Ensuring STACKIT Run Command service", func() error {
+		if err := deploymentPhase(ctx, c.Timeout, "Ensuring STACKIT Run Command service", func(phaseCtx context.Context) error {
 			if c.Agent.EnableService {
-				return cloud.ensureRunCommandService(ctx, c.ProjectID)
+				return cloud.ensureRunCommandService(phaseCtx, c.ProjectID)
 			}
-			return cloud.requireRunCommandService(ctx, c.ProjectID)
+			return cloud.requireRunCommandService(phaseCtx, c.ProjectID)
 		}); err != nil {
 			return err
 		}
 	}
 	var zoneResolved, machineResolved string
-	if err := progressAction(ctx, "Validating STACKIT placement", func() error {
+	if err := deploymentPhase(ctx, c.Timeout, "Validating STACKIT placement", func(phaseCtx context.Context) error {
 		var placementErr error
-		zoneResolved, placementErr = cloud.chooseZone(ctx, c.Server.AvailabilityZone)
+		zoneResolved, placementErr = cloud.chooseZone(phaseCtx, c.Server.AvailabilityZone)
 		if placementErr != nil {
 			return placementErr
 		}
-		machineResolved, placementErr = cloud.validateMachineType(ctx, c.Server.MachineType, info.VCPUs, info.MemoryMiB)
+		machineResolved, placementErr = cloud.validateMachineType(phaseCtx, c.Server.MachineType, info.VCPUs, info.MemoryMiB)
 		return placementErr
 	}); err != nil {
 		return err
 	}
 	// Provision DNS first so an unavailable name fails before the large image upload.
 	if c.DNS.Enabled {
-		if err := progressAction(ctx, "Ensuring STACKIT DNS zone", func() error {
-			dnsZone, dnsErr := cloud.ensureDNSZone(ctx, c.DNS)
+		if err := deploymentPhase(ctx, c.Timeout, "Ensuring STACKIT DNS zone", func(phaseCtx context.Context) error {
+			dnsZone, dnsErr := cloud.ensureDNSZone(phaseCtx, c.DNS)
 			if dnsErr != nil {
 				return dnsErr
 			}
@@ -296,24 +298,24 @@ func Run(args []string, version string) (runErr error) {
 		}
 	}
 	var netID string
-	if err := progressAction(ctx, "Ensuring STACKIT network", func() error {
+	if err := deploymentPhase(ctx, c.Timeout, "Ensuring STACKIT network", func(phaseCtx context.Context) error {
 		var networkErr error
-		netID, networkErr = cloud.ensureNetwork(ctx, c.Network)
+		netID, networkErr = cloud.ensureNetwork(phaseCtx, c.Network)
 		return networkErr
 	}); err != nil {
 		return fmt.Errorf("ensure network: %w", err)
 	}
 	var sgID string
-	if err := progressAction(ctx, "Ensuring appliance security group", func() error {
+	if err := deploymentPhase(ctx, c.Timeout, "Ensuring appliance security group", func(phaseCtx context.Context) error {
 		var securityErr error
-		sgID, securityErr = cloud.ensureSecurityGroup(ctx, c.SecurityGroup)
+		sgID, securityErr = cloud.ensureSecurityGroup(phaseCtx, c.SecurityGroup)
 		return securityErr
 	}); err != nil {
 		return fmt.Errorf("ensure security group: %w", err)
 	}
 	var resolvedImageID string
-	if err := progressAction(ctx, "Finding or creating normalized appliance image", func() error {
-		image, imageErr := cloud.ensureImage(ctx, c, info, zoneResolved, netID, sgID)
+	if err := deploymentPhase(ctx, c.Timeout, "Finding or creating normalized appliance image", func(phaseCtx context.Context) error {
+		image, imageErr := cloud.ensureImage(phaseCtx, c, info, zoneResolved, netID, sgID)
 		if imageErr != nil {
 			return imageErr
 		}
@@ -328,8 +330,8 @@ func Run(args []string, version string) (runErr error) {
 	}
 	passwordWasGenerated := c.Bootstrap.Enabled && c.Bootstrap.AdminPassword == ""
 	var resolvedServerID string
-	if err := progressAction(ctx, "Finding or creating Coriolis appliance server", func() error {
-		server, _, serverErr := cloud.ensureServer(ctx, c, resolvedImageID, zoneResolved, machineResolved, netID, sgID, "")
+	if err := deploymentPhase(ctx, c.Timeout, "Finding or creating Coriolis appliance server", func(phaseCtx context.Context) error {
+		server, _, serverErr := cloud.ensureServer(phaseCtx, c, resolvedImageID, zoneResolved, machineResolved, netID, sgID, "")
 		if serverErr != nil {
 			return serverErr
 		}
@@ -339,9 +341,9 @@ func Run(args []string, version string) (runErr error) {
 		return fmt.Errorf("ensure server: %w", err)
 	}
 	var appliancePassword string
-	if err := progressAction(ctx, "Bootstrapping Coriolis appliance", func() error {
+	if err := deploymentPhase(ctx, c.Timeout, "Bootstrapping Coriolis appliance", func(phaseCtx context.Context) error {
 		var bootstrapErr error
-		appliancePassword, bootstrapErr = cloud.bootstrapAppliance(ctx, c, resolvedServerID, fqdn)
+		appliancePassword, bootstrapErr = cloud.bootstrapAppliance(phaseCtx, c, resolvedServerID, fqdn)
 		return bootstrapErr
 	}); err != nil {
 		return fmt.Errorf("bootstrap appliance: %w", err)
@@ -354,20 +356,20 @@ func Run(args []string, version string) (runErr error) {
 	if c.Exposure.Mode == "application_load_balancer" {
 		fqdn := dnsRecordFQDN(c.DNS.RecordName, c.DNS.ZoneName)
 		var certificateID string
-		if err := progressAction(ctx, "Ensuring TLS certificate for Application Load Balancer", func() error {
+		if err := deploymentPhase(ctx, c.Timeout, "Ensuring TLS certificate for Application Load Balancer", func(phaseCtx context.Context) error {
 			var certificateErr error
-			certificateID, certificateErr = cloud.ensureCertificate(ctx, c.Exposure.Certificate, c.DNS.ZoneID, fqdn)
+			certificateID, certificateErr = cloud.ensureCertificate(phaseCtx, c.Exposure.Certificate, c.DNS.ZoneID, fqdn)
 			return certificateErr
 		}); err != nil {
 			return fmt.Errorf("ensure TLS certificate: %w", err)
 		}
 		var loadBalancerAddress string
-		if err := progressAction(ctx, "Ensuring STACKIT Application Load Balancer", func() error {
-			targetIP, targetErr := cloud.serverPrivateIP(ctx, resolvedServerID, netID)
+		if err := deploymentPhase(ctx, c.Timeout, "Ensuring STACKIT Application Load Balancer", func(phaseCtx context.Context) error {
+			targetIP, targetErr := cloud.serverPrivateIP(phaseCtx, resolvedServerID, netID)
 			if targetErr != nil {
 				return fmt.Errorf("get ALB target IP: %w", targetErr)
 			}
-			loadBalancer, albErr := cloud.ensureALB(ctx, c.Exposure.LoadBalancer, netID, targetIP, fqdn, certificateID)
+			loadBalancer, albErr := cloud.ensureALB(phaseCtx, c.Exposure.LoadBalancer, netID, targetIP, fqdn, certificateID)
 			if albErr != nil {
 				return albErr
 			}
@@ -379,8 +381,8 @@ func Run(args []string, version string) (runErr error) {
 		if loadBalancerAddress == "" {
 			return fmt.Errorf("ALB %s is ready but has no external address", c.Exposure.LoadBalancer.Name)
 		}
-		if err := progressAction(ctx, "Pointing DNS to Application Load Balancer", func() error {
-			_, dnsErr := cloud.ensureDNS(ctx, c.DNS, loadBalancerAddress)
+		if err := deploymentPhase(ctx, c.Timeout, "Pointing DNS to Application Load Balancer", func(phaseCtx context.Context) error {
+			_, dnsErr := cloud.ensureDNS(phaseCtx, c.DNS, loadBalancerAddress)
 			return dnsErr
 		}); err != nil {
 			return fmt.Errorf("point DNS to ALB: %w", err)
@@ -391,9 +393,9 @@ func Run(args []string, version string) (runErr error) {
 		res.LoginURL = "https://" + fqdn
 	} else if c.PublicIP {
 		var ip string
-		if err := progressAction(ctx, "Ensuring appliance public IP", func() error {
+		if err := deploymentPhase(ctx, c.Timeout, "Ensuring appliance public IP", func(phaseCtx context.Context) error {
 			var publicIPErr error
-			ip, publicIPErr = cloud.ensurePublicIP(ctx, resolvedServerID, netID, c.PublicIPID, c.PublicIPAddress)
+			ip, publicIPErr = cloud.ensurePublicIP(phaseCtx, resolvedServerID, netID, c.PublicIPID, c.PublicIPAddress)
 			return publicIPErr
 		}); err != nil {
 			return fmt.Errorf("ensure public IP: %w", err)
@@ -401,16 +403,16 @@ func Run(args []string, version string) (runErr error) {
 		res.PublicIP = ip
 		res.LoginURL = "https://" + ip
 		if c.DNS.Enabled {
-			if err := progressAction(ctx, "Ensuring appliance DNS record", func() error {
+			if err := deploymentPhase(ctx, c.Timeout, "Ensuring appliance DNS record", func(phaseCtx context.Context) error {
 				var dnsErr error
-				fqdn, dnsErr = cloud.ensureDNS(ctx, c.DNS, ip)
+				fqdn, dnsErr = cloud.ensureDNS(phaseCtx, c.DNS, ip)
 				return dnsErr
 			}); err != nil {
 				return fmt.Errorf("ensure DNS: %w", err)
 			}
 			res.LoginURL = "https://" + fqdn
-			if err := progressAction(ctx, "Ensuring trusted appliance certificate", func() error {
-				return cloud.ensureDirectCertificate(ctx, c.Exposure.Certificate, c.DNS.ZoneID, resolvedServerID, fqdn)
+			if err := deploymentPhase(ctx, c.Timeout, "Ensuring trusted appliance certificate", func(phaseCtx context.Context) error {
+				return cloud.ensureDirectCertificate(phaseCtx, c.Exposure.Certificate, c.DNS.ZoneID, resolvedServerID, fqdn)
 			}); err != nil {
 				return fmt.Errorf("ensure direct appliance certificate: %w", err)
 			}

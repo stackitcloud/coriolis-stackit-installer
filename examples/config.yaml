@@ -3,6 +3,7 @@ credentials: credentials.json
 ova: coriolis-appliance-stackit-0.ova
 region: eu01
 
+# Maximum runtime for each major phase; every following phase receives a fresh budget.
 timeout: 90m
 poll_interval: 15s
 upload_attempts: 3

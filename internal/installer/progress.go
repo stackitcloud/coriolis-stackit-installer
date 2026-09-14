@@ -42,6 +42,19 @@ func progressActionWithUpdates(ctx context.Context, label string, action func(up
 	return err
 }
 
+// deploymentPhase gives each top-level deployment phase its own timeout. A
+// large image import must not consume the time budget required by later server
+// bootstrap or certificate phases.
+func deploymentPhase(parent context.Context, timeout time.Duration, label string, action func(context.Context) error) error {
+	ctx, cancel := context.WithTimeout(parent, timeout)
+	defer cancel()
+	err := progressAction(ctx, label, func() error { return action(ctx) })
+	if err != nil && ctx.Err() == context.DeadlineExceeded {
+		return fmt.Errorf("phase %q exceeded configured timeout %s: %w", label, timeout, err)
+	}
+	return err
+}
+
 func startProgressActivity(ctx context.Context, label string) *progressActivity {
 	a := &progressActivity{ctx: ctx, label: label, started: time.Now(), stop: make(chan struct{}), done: make(chan struct{})}
 	progressActivityMu.Lock()

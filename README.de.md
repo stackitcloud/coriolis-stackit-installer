@@ -119,7 +119,7 @@ flowchart LR
 | DNS | Zone finden/anlegen und A-Record verwalten | `dns.*` |
 | Login | Kennwort generieren oder vorgeben | `bootstrap.*` |
 | HTTPS | Direktes Appliance-Zertifikat oder optionaler ALB | `exposure.*` |
-| Laufzeit | Gesamt-Timeout, Polling und Upload-Wiederholungen | `timeout`, `poll_interval`, `upload_attempts` |
+| Laufzeit | Timeout je Hauptphase, Polling und Upload-Wiederholungen | `timeout`, `poll_interval`, `upload_attempts` |
 
 ## Typische Laufzeiten
 
@@ -150,10 +150,14 @@ Damit ergeben sich folgende Größenordnungen:
 - idempotenter Folgelauf ohne wesentliche Änderungen: meistens **2–10 Minuten**;
 - ALB-Modus: zusätzlich ungefähr **5–15 Minuten**.
 
-Das konfigurierte `timeout` ist eine technische Obergrenze und keine Schätzung.
-Bei langsamem Upload oder erstmaligem Import sollte es vorsorglich auf `120m` bis
-`150m` erhöht werden. `storage_premium_perf1` kann insbesondere die beiden
-Konvertierungsschritte stark verlängern; die Schätzungen basieren auf `perf12`.
+Das konfigurierte `timeout` ist eine technische Obergrenze für jede einzelne
+Hauptphase und nicht mehr für die Summe des vollständigen Deployments. Dadurch kann
+ein langer erstmaliger Image-Import nicht das später für Bootstrap oder
+Zertifikatsinstallation benötigte Zeitbudget aufbrauchen. Wenn eine einzelne Phase
+wie die Image-Normalisierung länger als 90 Minuten dauern kann, sollte der Wert auf
+`120m` oder `150m` erhöht werden. `storage_premium_perf1` kann insbesondere die
+beiden Konvertierungsschritte stark verlängern; die Schätzungen basieren auf
+`perf12`.
 
 ### Fortschrittsausgabe
 
@@ -537,11 +541,14 @@ Migrations- und Worker-Verbindungen werden nicht automatisch durch ihn geführt.
 | `credentials` | Pfad zum Service-Account-Key | erforderlich |
 | `ova` | Pfad zur Coriolis-OVA | erforderlich |
 | `region` | STACKIT-Region | `eu01` |
-| `timeout` | Maximale Gesamtlaufzeit | `90m` |
+| `timeout` | Maximale Laufzeit jeder einzelnen Hauptphase | `90m` |
 | `poll_interval` | Pollingintervall für asynchrone Ressourcen | `15s` |
 | `upload_attempts` | Transferwiederholungen | `3` |
 
-Bei sehr großen Images oder langsamer Anbindung sollte `timeout` erhöht werden.
+Jede Hauptphase erhält ein frisches Timeout-Budget. Der Wert sollte erhöht werden,
+wenn eine einzelne Phase bei sehr großen Images oder langsamer Anbindung länger
+dauern kann. Eine Timeout-Fehlermeldung nennt die Phase, deren Budget ausgeschöpft
+wurde.
 
 ### `agent` und `bootstrap`
 

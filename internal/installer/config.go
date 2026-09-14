@@ -135,7 +135,7 @@ type ALBConfig struct {
 func defaultConfig() Config {
 	f := false
 	return Config{
-		Region: "eu01", TimeoutText: "90m", PollText: "15s", UploadAttempts: 3,
+		Region: "eu01", Timeout: 90 * time.Minute, TimeoutText: "90m", PollInterval: 15 * time.Second, PollText: "15s", UploadAttempts: 3,
 		Image:         ImageConfig{NamePrefix: "coriolis-appliance", DiskBus: "virtio", NICModel: "virtio", UEFI: &f, SecureBoot: &f},
 		Server:        ServerConfig{Name: "coriolis-appliance", MachineType: "c1a.4d", BootVolumeSize: 48, PerformanceClass: "storage_premium_perf12"},
 		Network:       NetworkConfig{Name: "coriolis-network", Prefix: "10.1.100.0/24", Routed: true},
@@ -184,6 +184,12 @@ func loadConfig(path string) (Config, error) {
 }
 
 func (c Config) validate() error {
+	if c.Timeout <= 0 {
+		return errors.New("timeout must be positive")
+	}
+	if c.PollInterval <= 0 {
+		return errors.New("poll_interval must be positive")
+	}
 	if c.ProjectID == "" {
 		return errors.New("project-id is required")
 	}

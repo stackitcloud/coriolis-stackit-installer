@@ -118,7 +118,7 @@ flowchart LR
 | DNS | Discover/create zone and manage A record | `dns.*` |
 | Login | Generate or supply the password | `bootstrap.*` |
 | HTTPS | Direct appliance certificate or optional ALB | `exposure.*` |
-| Runtime | Overall timeout, polling, and upload retries | `timeout`, `poll_interval`, `upload_attempts` |
+| Runtime | Per-phase timeout, polling, and upload retries | `timeout`, `poll_interval`, `upload_attempts` |
 
 ## Typical durations
 
@@ -149,9 +149,12 @@ Typical totals are:
 - idempotent rerun without material changes: usually **2–10 minutes**;
 - ALB mode: approximately **5–15 additional minutes**.
 
-The configured `timeout` is a technical upper limit, not an estimate. For a first
-import or a slow upload, increase it to `120m` or `150m`. The conversion steps can
-take substantially longer with `storage_premium_perf1`; the estimates above assume
+The configured `timeout` is a technical upper limit for each major deployment
+phase, not for the sum of the complete deployment. This prevents a long initial
+image import from consuming the time budget needed later by server bootstrap or
+certificate installation. Increase it to `120m` or `150m` if one individual phase,
+such as image normalization, can exceed 90 minutes. The conversion steps can take
+substantially longer with `storage_premium_perf1`; the estimates above assume
 `perf12`.
 
 ### Progress output
@@ -524,11 +527,13 @@ migration and worker connections are not routed through it automatically.
 | `credentials` | Service account key path | required |
 | `ova` | Coriolis OVA path | required |
 | `region` | STACKIT region | `eu01` |
-| `timeout` | Maximum total runtime | `90m` |
+| `timeout` | Maximum runtime of each major deployment phase | `90m` |
 | `poll_interval` | Polling interval for asynchronous resources | `15s` |
 | `upload_attempts` | Transfer attempts | `3` |
 
-Increase `timeout` for very large images or slow connections.
+Each major phase receives a fresh timeout budget. Increase `timeout` when a single
+phase can take longer, for example when normalizing a very large image over a slow
+connection. A timeout error names the phase that exhausted its budget.
 
 ### `agent` and `bootstrap`
 

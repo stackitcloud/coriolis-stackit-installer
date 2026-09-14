@@ -126,3 +126,33 @@ func TestNestedProgressOnlyHeartbeatsForMostSpecificActivity(t *testing.T) {
 		t.Fatalf("specific inner heartbeat is missing: %q", got)
 	}
 }
+
+func TestDeploymentPhaseHasIndependentDescriptiveTimeout(t *testing.T) {
+	err := deploymentPhase(context.Background(), 5*time.Millisecond, "slow phase", func(ctx context.Context) error {
+		<-ctx.Done()
+		return ctx.Err()
+	})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("error=%v, want deadline exceeded", err)
+	}
+	for _, expected := range []string{`phase "slow phase"`, "configured timeout 5ms"} {
+		if !strings.Contains(err.Error(), expected) {
+			t.Fatalf("error %q does not contain %q", err, expected)
+		}
+	}
+}
+
+func TestDeploymentPhasesReceiveFreshTimeoutBudgets(t *testing.T) {
+	started := time.Now()
+	for _, label := range []string{"image phase", "bootstrap phase"} {
+		if err := deploymentPhase(context.Background(), 50*time.Millisecond, label, func(context.Context) error {
+			time.Sleep(30 * time.Millisecond)
+			return nil
+		}); err != nil {
+			t.Fatalf("%s unexpectedly failed: %v", label, err)
+		}
+	}
+	if time.Since(started) <= 50*time.Millisecond {
+		t.Fatal("test did not exceed one phase budget in total")
+	}
+}

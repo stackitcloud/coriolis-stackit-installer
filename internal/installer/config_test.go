@@ -39,6 +39,20 @@ func TestNormalizationScratchMustFitApplianceDisk(t *testing.T) {
 	}
 }
 
+func TestRuntimeIntervalsMustBePositive(t *testing.T) {
+	c := defaultConfig()
+	c.ProjectID, c.Credentials, c.OVA = "project", "credentials.json", "image.ova"
+	c.Timeout = 0
+	if err := c.validate(); err == nil {
+		t.Fatal("expected non-positive timeout validation error")
+	}
+	c.Timeout = defaultConfig().Timeout
+	c.PollInterval = 0
+	if err := c.validate(); err == nil {
+		t.Fatal("expected non-positive poll interval validation error")
+	}
+}
+
 func TestDNSRequiresZoneAndPublicIP(t *testing.T) {
 	c := defaultConfig()
 	c.ProjectID = "p"
