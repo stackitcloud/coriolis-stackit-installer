@@ -477,9 +477,12 @@ Der Bootstrap:
 
 - setzt den Hostnamen;
 - wartet auf Keystone;
-- setzt das Kennwort des Coriolis-Administrators `admin`;
-- aktualisiert die lokale OpenRC-Datei;
+- setzt das Kennwort des Coriolis-Administrators `admin` in der Domain `default`;
+- persistiert das Kennwort in Kollas maßgeblicher `passwords.yml` und
+  aktualisiert die lokale OpenRC-Datei;
 - führt die herstellereigene Exposure-Logik aus;
+- prüft danach die regenerierte OpenRC-Datei, eine echte Keystone-Anmeldung und
+  den lokalen Webdienst;
 - speichert Kennwort und Idempotenzmarker unter `/var/lib/coriolis-stackit` mit
   Root-only-Berechtigungen.
 

@@ -467,9 +467,12 @@ Bootstrap:
 
 - sets the hostname;
 - waits for Keystone;
-- sets the password of the Coriolis `admin` user;
-- updates the local OpenRC file;
+- sets the password of the Coriolis `admin` user in the `default` domain;
+- persists the password in Kolla's `passwords.yml` source of truth and updates
+  the local OpenRC file;
 - invokes the vendor exposure logic;
+- verifies the regenerated OpenRC, a real Keystone login, and the local web
+  service after vendor reconfiguration;
 - stores the password and idempotency marker below `/var/lib/coriolis-stackit`
   with root-only permissions.
 
