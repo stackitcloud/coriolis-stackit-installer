@@ -1,243 +1,241 @@
 # Coriolis STACKIT Installer
 
-Der Coriolis STACKIT Installer stellt eine Cloudbase Coriolis Appliance aus einer
-OVA reproduzierbar in einem STACKIT-Projekt bereit. Der komplette Ablauf wird von
-einem Go-Binary gesteuert. Terraform, die STACKIT CLI, eine serielle Konsole und
-manuelle Schritte in der WebConsole sind nicht erforderlich.
+**English** | [Deutsch](README.de.md)
 
-Als Eingaben genügen im Normalfall:
+The Coriolis STACKIT Installer deploys a Cloudbase Coriolis Appliance from an OVA
+to a STACKIT project in a reproducible way. A single Go binary controls the entire
+workflow. Terraform, the STACKIT CLI, a serial console, and manual Web Console
+steps are not required.
 
-- ein STACKIT Service-Account-Key,
-- die ID des Zielprojekts,
-- die gewünschte STACKIT-Region,
-- das Coriolis-OVA,
-- eine YAML-Datei für die projektspezifischen Einstellungen.
+A typical installation only needs:
 
-Kommandozeilenparameter können ausgewählte YAML-Werte überschreiben. Wiederholte
-Aufrufe sind vorgesehen: Der Installer findet bereits angelegte Ressourcen wieder,
-setzt unterbrochene Image-Importe fort und erzeugt nicht bei jedem Lauf eine neue VM.
-Die Auflösungsreihenfolge lautet: eingebaute Defaults, danach YAML, danach explizite
-CLI-Parameter.
+- a STACKIT service account key;
+- the target project ID;
+- the desired STACKIT region;
+- the Coriolis OVA;
+- a YAML file containing project-specific settings.
 
-## Funktionsumfang
+Selected YAML values can be overridden with command-line flags. Repeated runs are
+expected and supported: the installer discovers existing resources, resumes
+interrupted image imports, and does not create a new VM on every run. Configuration
+precedence is: built-in defaults, then YAML, then explicit CLI flags.
 
-Der Installer kann:
+## Features
 
-- OVF-Metadaten und SHA-256 des OVA lokal ermitteln;
-- Availability Zone und Machine Type gegen die OVA-Anforderungen prüfen;
-- den STACKIT Run-Command-Dienst bei Bedarf projektweit aktivieren;
-- ein neues oder vorhandenes Netzwerk verwenden;
-- eine Security Group anlegen und fehlende Ingress-Regeln ergänzen;
-- die VMDK ohne lokale Extraktion auf eine temporäre STACKIT-Hilfs-VM streamen;
-- die Appliance auf performanten STACKIT-Volumes konvertieren und normalisieren;
-- den STACKIT Server Agent offline in das Appliance-Dateisystem integrieren;
-- ein wiederverwendbares QCOW2-Image mit Fortschrittsanzeige importieren;
-- Images automatisch anhand des OVA-Hashs finden und wiederverwenden;
-- Images mit Projekten oder der Parent Organization teilen;
-- ein zentrales Image-Projekt und davon getrennte Zielprojekte verwenden;
-- eine neue VM erzeugen oder einen ausdrücklich angegebenen Server übernehmen;
-- eine freie, neue oder ausdrücklich angegebene Public IP zuordnen;
-- eine STACKIT-DNS-Zone sowie den A-Record anlegen oder aktualisieren;
-- ein individuelles Admin-Kennwort generieren oder ein vorgegebenes setzen;
-- ein öffentlich vertrauenswürdiges Zertifikat per ACME DNS-01 direkt in der
-  Appliance installieren;
-- alternativ einen STACKIT Application Load Balancer mit TLS-Terminierung anlegen;
-- temporäre Hilfsressourcen nach einem erfolgreichen Image-Import entfernen.
+The installer can:
 
-Der Installer ist kein Coriolis-Upgrade-Werkzeug. Eine neue OVA ersetzt keinen
-zustandsbehafteten Server und migriert weder Lizenz noch Projekte, Endpoints oder
-Transferdaten. Ein bestehender Server wird niemals automatisch gelöscht oder durch
-ein neues Image ersetzt.
+- read OVF metadata and calculate the OVA SHA-256 locally;
+- validate the availability zone and machine type against OVA requirements;
+- enable the project-wide STACKIT Run Command service when required;
+- use a new or existing network;
+- create a security group and add missing ingress rules;
+- stream the VMDK to a temporary STACKIT helper VM without extracting it locally;
+- convert and normalize the appliance on high-performance STACKIT volumes;
+- inject the STACKIT Server Agent into the appliance filesystem offline;
+- import a reusable QCOW2 image with progress reporting;
+- find and reuse images automatically by OVA hash;
+- share images with projects or the parent organization;
+- use a central image project independently from target projects;
+- create a new VM or explicitly adopt an existing server;
+- assign an existing, free, or newly created public IP;
+- create or update a STACKIT DNS zone and A record;
+- generate an appliance-specific admin password or apply a supplied password;
+- install a publicly trusted certificate directly on the appliance through ACME
+  DNS-01;
+- alternatively create a STACKIT Application Load Balancer with TLS termination;
+- remove temporary helper resources after a successful image import.
 
-## Ablaufübersicht
+This installer is not a Coriolis upgrade tool. A new OVA does not replace a
+stateful server and does not migrate its license, projects, endpoints, or transfer
+data. An existing server is never deleted automatically or replaced with a new
+image.
+
+## Workflow overview
 
 ```mermaid
 flowchart TD
-    A["Go-Binary, YAML, Credentials und OVA"] --> B["OVA lesen: OVF, SHA-256, CPU, RAM und Disk"]
-    B --> C["Konfiguration und STACKIT-Platzierung prüfen"]
-    C --> R["Run Command Service prüfen und bei Bedarf aktivieren"]
-    R --> D["DNS-Zone, Netzwerk und Security Group sicherstellen"]
-    D --> E{"Passendes normalisiertes Image sichtbar?"}
+    A["Go binary, YAML, credentials, and OVA"] --> B["Read OVA: OVF, SHA-256, CPU, RAM, and disk"]
+    B --> C["Validate configuration and STACKIT placement"]
+    C --> R["Check and, if needed, enable Run Command"]
+    R --> D["Ensure DNS zone, network, and security group"]
+    D --> E{"Matching normalized image visible?"}
 
-    E -- Ja --> K["Image wiederverwenden und Freigaben ergänzen"]
-    E -- Nein --> F["Temporäre Hilfs-VM, perf12-Volumes, Public IP und SSH-Key anlegen"]
-    F --> G["VMDK aus OVA streamen und mit qemu-img nach RAW konvertieren"]
-    G --> H["Server Agent offline injizieren und maschinenspezifischen Zustand entfernen"]
-    H --> I["Nach QCOW2 konvertieren und mit Fortschritt in STACKIT hochladen"]
-    I --> J["Image auf AVAILABLE prüfen und Hilfsressourcen entfernen"]
+    E -- Yes --> K["Reuse image and update shares"]
+    E -- No --> F["Create temporary helper VM, perf12 volumes, public IP, and SSH key"]
+    F --> G["Stream VMDK from OVA and convert it to RAW with qemu-img"]
+    G --> H["Inject Server Agent offline and remove machine-specific state"]
+    H --> I["Convert to QCOW2 and upload to STACKIT with progress"]
+    I --> J["Wait for AVAILABLE and remove helper resources"]
     J --> K
 
-    K --> L["VM anlegen oder ausdrücklich angegebenen Server übernehmen"]
-    L --> M["Hostname und individuelles Admin-Kennwort über Server Agent setzen"]
-    M --> N{"Exposure-Modus"}
-    N -- Direct --> O["Public IP, DNS und optional ACME-Zertifikat direkt auf der Appliance"]
-    N -- ALB --> P["ACME-Zertifikat in Certificate Service und HTTPS-Listener am ALB"]
-    O --> Q["Strukturiertes JSON-Ergebnis"]
+    K --> L["Create VM or explicitly adopt an existing server"]
+    L --> M["Set hostname and unique admin password through Server Agent"]
+    M --> N{"Exposure mode"}
+    N -- Direct --> O["Public IP, DNS, and optional ACME certificate on appliance"]
+    N -- ALB --> P["ACME certificate in Certificate Service and HTTPS listener on ALB"]
+    O --> Q["Structured JSON result"]
     P --> Q
 ```
 
-Das resultierende Laufzeitmodell sieht so aus:
+The resulting runtime architecture is:
 
 ```mermaid
 flowchart LR
-    U["Browser oder Coriolis-Client"] --> DNS["STACKIT DNS"]
+    U["Browser or Coriolis client"] --> DNS["STACKIT DNS"]
 
-    subgraph T["STACKIT-Zielprojekt"]
-        NET["Privates Netzwerk"]
-        SG["Security Group"]
+    subgraph T["STACKIT target project"]
+        NET["Private network"]
+        SG["Security group"]
         VM["Coriolis Appliance"]
         AGENT["STACKIT Server Agent"]
         PIP["Public IP"]
-        ALB["Optionaler Application Load Balancer"]
+        ALB["Optional Application Load Balancer"]
         NET --- VM
         SG --- VM
         AGENT --- VM
         PIP -->|"Direct: HTTPS 443"| VM
-        ALB -->|"Optional: HTTP 80 intern"| VM
+        ALB -->|"Optional: internal HTTP 80"| VM
     end
 
     DNS -->|"Direct"| PIP
-    DNS -.->|"Alternativ"| ALB
-    API["STACKIT APIs und Run Command"] --> AGENT
-    VM -->|"Ausgehende Provider- und Worker-Verbindungen"| CLOUDS["Quell- und Zielplattformen"]
+    DNS -.->|"Alternative"| ALB
+    API["STACKIT APIs and Run Command"] --> AGENT
+    VM -->|"Outbound provider and worker connections"| CLOUDS["Source and target platforms"]
 ```
 
-## Einstellungen auf einen Blick
+## Settings at a glance
 
-| Bereich | High-Level-Entscheidung | Typische Einstellung |
+| Area | High-level decision | Relevant settings |
 |---|---|---|
-| Ziel | Projekt und Region | `project_id`, `region` |
-| Image | Automatisch finden, explizite ID oder zentrales Image-Projekt | `image.id`, `image.owner_project_id` |
-| Image-Freigabe | Keine, einzelne Projekte oder gesamte Organisation | `image.share.*` |
-| Compute | Availability Zone, Machine Type und Boot-Disk | `server.*` |
-| Performance | Performanceklasse der Appliance- und Normalisierungsdisks | `server.performance_class`, `normalization.performance_class` |
-| Netzwerk | Vorhandenes Netzwerk oder automatisch angelegtes Netzwerk | `network.id` oder `network.name` |
-| Firewall | Erlaubte eingehende Ports und Quellnetze | `security_group.ingress` |
-| Public IP | Automatisch, vorhandene ID/Adresse oder keine | `public_ip`, `public_ip_id`, `public_ip_address` |
-| DNS | Zone finden/anlegen und A-Record verwalten | `dns.*` |
-| Login | Kennwort generieren oder vorgeben | `bootstrap.*` |
-| HTTPS | Direktes Appliance-Zertifikat oder optionaler ALB | `exposure.*` |
-| Laufzeit | Gesamt-Timeout, Polling und Upload-Wiederholungen | `timeout`, `poll_interval`, `upload_attempts` |
+| Target | Project and region | `project_id`, `region` |
+| Image | Automatic discovery, explicit ID, or central image project | `image.id`, `image.owner_project_id` |
+| Image sharing | None, individual projects, or entire organization | `image.share.*` |
+| Compute | Availability zone, machine type, and boot disk | `server.*` |
+| Performance | Appliance and normalization disk performance | `server.performance_class`, `normalization.performance_class` |
+| Network | Existing network or automatically managed network | `network.id` or `network.name` |
+| Firewall | Allowed ingress ports and source networks | `security_group.ingress` |
+| Public IP | Automatic, existing ID/address, or none | `public_ip`, `public_ip_id`, `public_ip_address` |
+| DNS | Discover/create zone and manage A record | `dns.*` |
+| Login | Generate or supply the password | `bootstrap.*` |
+| HTTPS | Direct appliance certificate or optional ALB | `exposure.*` |
+| Runtime | Overall timeout, polling, and upload retries | `timeout`, `poll_interval`, `upload_attempts` |
 
-## Typische Laufzeiten
+## Typical durations
 
-Die folgenden Werte sind Richtwerte für das derzeitige OVA mit ungefähr 7 GiB
-komprimierter VMDK, Normalisierungsvolumes der Klasse `storage_premium_perf12` und
-einer stabilen Internetverbindung. STACKIT-Auslastung, lokale Uploadbandbreite,
-OVA-Größe und Storageklasse können die Zeiten deutlich verändern.
+The following values are estimates for the current OVA with an approximately
+7 GiB compressed VMDK, `storage_premium_perf12` normalization volumes, and a
+stable internet connection. STACKIT load, local upload bandwidth, OVA size, and
+storage class can change these values significantly.
 
-| Schritt | Typische Dauer | Wichtigster Einfluss |
+| Step | Typical duration | Main influence |
 |---|---:|---|
-| OVA lesen, OVF auswerten und SHA-256 bilden | 30 Sekunden–3 Minuten | lokale Diskgeschwindigkeit |
-| Credentials, Platzierung und Run Command Service prüfen/aktivieren | 30 Sekunden–3 Minuten | erstmalige Serviceaktivierung |
-| DNS-Zone, Netzwerk und Security Group sicherstellen | 1–4 Minuten | Anzahl neu anzulegender Ressourcen |
-| Normalisierungsvolumes und Hilfs-VM starten | 3–10 Minuten | VM-/Volume-Provisionierung und Agent-Start |
-| VMDK aus dem OVA zur Hilfs-VM übertragen | 8–30 Minuten | lokale Uploadbandbreite; bei 7 GiB etwa 10 Minuten mit 100 Mbit/s netto |
-| VMDK nach RAW konvertieren | 3–15 Minuten | OVA-Format und Volume-Performanceklasse |
-| Appliance offline normalisieren | 1–5 Minuten | Dateisystemprüfung und Agent-Installation |
-| RAW nach QCOW2 konvertieren und hochladen | 8–30 Minuten | Datenbelegung, CPU und Volume-Performanceklasse |
-| STACKIT-Image bis `AVAILABLE` verarbeiten | 3–15 Minuten | Image-Service-Auslastung |
-| Appliance-VM booten und Server Agent abwarten | 3–10 Minuten | Boot und erstmalige Agent-Registrierung |
-| Kennwort, Public IP, DNS und direktes Zertifikat konfigurieren | 2–10 Minuten | DNS-Propagation und ACME |
-| Optionalen ALB bereitstellen | zusätzlich 5–15 Minuten | ALB- und Listener-Provisionierung |
+| Read OVA, parse OVF, and calculate SHA-256 | 30 seconds–3 minutes | Local disk performance |
+| Check credentials, placement, and Run Command service | 30 seconds–3 minutes | Initial service activation |
+| Ensure DNS zone, network, and security group | 1–4 minutes | Number of new resources |
+| Start normalization volumes and helper VM | 3–10 minutes | VM/volume provisioning and agent startup |
+| Transfer VMDK from OVA to helper VM | 8–30 minutes | Local upload; 7 GiB takes about 10 minutes at a net 100 Mbit/s |
+| Convert VMDK to RAW | 3–15 minutes | OVA format and volume performance class |
+| Normalize the appliance offline | 1–5 minutes | Filesystem checks and agent installation |
+| Convert RAW to QCOW2 and upload | 8–30 minutes | Allocated data, CPU, and volume performance |
+| Process STACKIT image until `AVAILABLE` | 3–15 minutes | Image service load |
+| Boot appliance VM and wait for Server Agent | 3–10 minutes | Boot and initial agent registration |
+| Configure password, public IP, DNS, and direct certificate | 2–10 minutes | DNS propagation and ACME |
+| Provision optional ALB | additional 5–15 minutes | ALB and listener provisioning |
 
-Damit ergeben sich folgende Größenordnungen:
+Typical totals are:
 
-- erster vollständiger Import mit direktem HTTPS: meistens **40–100 Minuten**;
-- Deployment mit bereits normalisiertem oder geteiltem Image: meistens **8–25 Minuten**;
-- idempotenter Folgelauf ohne wesentliche Änderungen: meistens **2–10 Minuten**;
-- ALB-Modus: zusätzlich ungefähr **5–15 Minuten**.
+- first complete import with direct HTTPS: usually **40–100 minutes**;
+- deployment using an existing normalized or shared image: usually **8–25 minutes**;
+- idempotent rerun without material changes: usually **2–10 minutes**;
+- ALB mode: approximately **5–15 additional minutes**.
 
-Das konfigurierte `timeout` ist eine technische Obergrenze und keine Schätzung.
-Bei langsamem Upload oder erstmaligem Import sollte es vorsorglich auf `120m` bis
-`150m` erhöht werden. `storage_premium_perf1` kann insbesondere die beiden
-Konvertierungsschritte stark verlängern; die Schätzungen basieren auf `perf12`.
+The configured `timeout` is a technical upper limit, not an estimate. For a first
+import or a slow upload, increase it to `120m` or `150m`. The conversion steps can
+take substantially longer with `storage_premium_perf1`; the estimates above assume
+`perf12`.
 
-## Technische Voraussetzungen
+## Technical prerequisites
 
-### Bedienrechner
+### Operator workstation
 
-Für die Ausführung werden benötigt:
+The operator workstation needs:
 
-- das für das Betriebssystem und die CPU-Architektur gebaute Installer-Binary;
-- lesender Zugriff auf das OVA;
-- ausgehendes HTTPS zu den STACKIT APIs und – bei aktiviertem Zertifikat – zum
-  ACME-Dienst;
-- beim erstmaligen Normalisieren eines OVA ausgehendes TCP/22 zur temporären
-  Public IP der Hilfs-VM;
-- ausreichend freier lokaler Speicher zum Lesen des OVA. Die VMDK wird nicht lokal
-  extrahiert und es wird lokal kein QCOW2 erzeugt.
+- an installer binary built for its operating system and CPU architecture;
+- read access to the OVA;
+- outbound HTTPS to STACKIT APIs and, when certificates are enabled, the ACME CA;
+- outbound TCP/22 to the temporary helper VM's public IP while normalizing a new
+  OVA;
+- enough local storage to read the OVA. The VMDK is not extracted and no QCOW2 is
+  created locally.
 
-Zum Bauen aus dem Quellcode wird Go 1.25 oder neuer benötigt. `qemu-img`, Terraform,
-libguestfs, `virt-customize` und die STACKIT CLI sind auf dem Bedienrechner nicht
-erforderlich.
+Building from source requires Go 1.25 or newer. `qemu-img`, Terraform, libguestfs,
+`virt-customize`, and the STACKIT CLI are not required on the operator workstation.
 
-### STACKIT-Projekt und Berechtigungen
+### STACKIT project and permissions
 
-Der Installer aktiviert den projektweiten STACKIT Run Command Service standardmäßig
-selbst, bevor er weitere Cloud-Ressourcen anlegt. Dafür benötigt der Service Account
-die Rolle **Project Editor**. Mit `agent.enable_service: false` kann die Aktivierung
-unterdrückt werden; dann muss der Dienst bereits aktiviert sein.
+By default, the installer enables the project-wide STACKIT Run Command service
+before creating other cloud resources. The service account requires the
+**Project Editor** role for this operation. Set `agent.enable_service: false` to
+disable automatic activation; the service must then already be enabled.
 
-Zusätzlich benötigt der Service Account Lese- und Änderungsrechte für die Ressourcen,
-die der gewählte Ablauf nutzt:
+The service account also needs read and write permissions for the resources used
+by the selected workflow:
 
-- IaaS: Images, Server, Volumes, Netzwerke, NICs, Security Groups, Public IPs und
-  temporäre Keypairs;
-- Server Agent / Run Command;
-- STACKIT DNS, wenn `dns.enabled: true` gesetzt ist;
-- Application Load Balancer und Certificate Service nur im ALB-Modus.
+- IaaS images, servers, volumes, networks, NICs, security groups, public IPs, and
+  temporary key pairs;
+- Server Agent and Run Command;
+- STACKIT DNS when `dns.enabled: true`;
+- Application Load Balancer and Certificate Service only in ALB mode.
 
-Bei einem zentralen Image-Projekt werden die IaaS- und Image-Freigaberechte sowohl
-im Image-Eigentümerprojekt als auch im Zielprojekt benötigt. Beide Projekte müssen
-zur selben Organisation gehören und das Image in derselben Region verwenden.
+With a central image project, IaaS and image-sharing permissions are required in
+both the image-owner project and the target project. Both projects must belong to
+the same organization and use the same region.
 
-Die Datei mit dem Service-Account-Key sollte nur für den aktuellen Benutzer lesbar
-sein:
+Restrict the service account key to the current user:
 
 ```bash
 chmod 600 credentials.json
 ```
 
-### Quotas und ausgehende Verbindungen
+### Quotas and outbound connectivity
 
-Beim ersten Import werden vorübergehend eine Hilfs-VM, zwei Datenvolumes, eine
-Public IP, eine Security Group und ein Keypair benötigt. Zusätzlich muss Quota für
-das normalisierte Image, die Appliance-VM und deren Boot-Volume vorhanden sein.
+The first import temporarily needs one helper VM, two data volumes, one public IP,
+one security group, and one key pair. Additional quota is required for the
+normalized image, appliance VM, and its boot volume.
 
-Die Hilfs-VM benötigt ausgehenden Zugriff auf Ubuntu-Paketquellen, den STACKIT-
-Metadatendienst und die Image-Upload-URL. Das Zielnetz muss für den Server Agent und
-die späteren Coriolis-Verbindungen ausgehenden Verkehr erlauben.
+The helper VM needs outbound access to Ubuntu package repositories, the STACKIT
+metadata service, and the image upload URL. The target network must allow outbound
+traffic for the Server Agent and later Coriolis connections.
 
-### OVA-Anforderungen
+### OVA requirements
 
-Das OVA muss ein TAR-basiertes OVA mit genau einem OVF und genau einer referenzierten
-virtuellen Disk enthalten. Der Installer liest CPU, RAM, Diskgröße, Betriebssystem
-und Firmware aus dem OVF. Aktuell wird genau eine Appliance-Disk unterstützt.
+The OVA must be TAR-based and contain exactly one OVF plus exactly one referenced
+virtual disk. The installer reads CPU, RAM, disk size, operating system, and
+firmware from the OVF. Exactly one appliance disk is currently supported.
 
-## Schnellstart
+## Quick start
 
-### 1. Binary bauen
+### 1. Build the binary
 
-Dieser Schritt entfällt, wenn bereits ein passendes Binary vorliegt.
+Skip this step when a suitable binary already exists.
 
 ```bash
 make check
 ```
 
-Das Binary wird als `bin/coriolis-stackit` erzeugt. `make check` führt vorher die
-Go-Tests aus.
+The binary is created as `bin/coriolis-stackit`. `make check` runs the Go tests
+before building.
 
-### 2. Konfiguration anlegen
+### 2. Create a configuration
 
-[`examples/config.yaml`](examples/config.yaml) enthält alle Einstellungen. Für ein
-neues Projekt empfiehlt sich eine eigene Datei:
+[`examples/config.yaml`](examples/config.yaml) contains every setting. Copy it for
+a new project:
 
 ```bash
 cp examples/config.yaml config.yaml
 ```
 
-Ein minimales, für den direkten HTTPS-Zugriff geeignetes Beispiel:
+A minimal example suitable for direct HTTPS access is:
 
 ```yaml
 project_id: 00000000-0000-0000-0000-000000000000
@@ -280,41 +278,41 @@ bootstrap:
   print_generated_password: true
 ```
 
-`project_id` bestimmt nicht automatisch die Region. `region` sollte deshalb immer
-bewusst gesetzt werden. Die IDs öffentlicher Helper-Images sind regionsabhängig.
+`project_id` does not automatically determine the region. Always set `region`
+deliberately. Public helper image IDs are region-specific.
 
-### 3. Lokal prüfen
+### 3. Validate locally
 
 ```bash
 ./bin/coriolis-stackit --config config.yaml --dry-run
 ```
 
-`--dry-run` liest und validiert die Konfiguration, analysiert das OVA und gibt den
-aufgelösten Plan als JSON aus. Es werden keine Cloud-Ressourcen verändert.
+`--dry-run` reads and validates the configuration, inspects the OVA, and prints
+the resolved plan as JSON. It does not modify cloud resources.
 
-### 4. Cloud-Zugriff und Platzierung prüfen
+### 4. Validate cloud access and placement
 
 ```bash
 ./bin/coriolis-stackit --config config.yaml --check-cloud
 ```
 
-Dieser Check authentifiziert sich, prüft Region, Availability Zone, Machine Type
-und – soweit aktiviert – den DNS- beziehungsweise ALB-Zugriff. Er reserviert keine
-Ressourcen und ersetzt keine vollständige Quota-Prüfung.
+This check authenticates and validates the region, availability zone, machine
+type, and—when enabled—DNS or ALB access. It does not reserve resources and does
+not replace a complete quota check.
 
-### 5. Deployment starten
+### 5. Start the deployment
 
 ```bash
 ./bin/coriolis-stackit --config config.yaml
 ```
 
-Der erste Lauf kann wegen Upload, zwei Konvertierungen und Image-Import deutlich
-länger dauern. Für den VMDK-Transfer sowie den Image-Upload wird regelmäßig ein
-prozentualer Fortschritt mit Datenmenge und Übertragungsrate ausgegeben.
+The first run can take considerably longer because it includes transfer, two
+conversions, and image import. The VMDK transfer and image upload regularly print
+percentage, transferred bytes, and throughput.
 
-### 6. Ergebnis sicher speichern
+### 6. Store the result securely
 
-Bei Erfolg schreibt das Programm ein JSON-Objekt nach stdout, beispielsweise:
+On success, the program writes a JSON object to stdout, for example:
 
 ```json
 {
@@ -331,296 +329,285 @@ Bei Erfolg schreibt das Programm ein JSON-Objekt nach stdout, beispielsweise:
 }
 ```
 
-Wenn `bootstrap.print_generated_password: true` gesetzt ist, enthält die Ausgabe
-das generierte Kennwort. Die Ausgabe sollte dann direkt in einen geschützten Secret
-Store übernommen und nicht in Build-Logs archiviert werden. Bei `false` wird das
-Kennwort nicht ausgegeben.
+When `bootstrap.print_generated_password: true`, the result includes the generated
+password. Send this output directly to a protected secret store; do not archive it
+in build logs. With `false`, the password is not printed.
 
-### 7. Wiederholung testen
+### 7. Test a repeated run
 
-Der gleiche Befehl darf erneut ausgeführt werden:
+Run the same command again:
 
 ```bash
 ./bin/coriolis-stackit --config config.yaml
 ```
 
-Ein erfolgreicher Wiederholungslauf verwendet Image und Infrastruktur erneut. Bei
-einem aktuellen direkten Zertifikat erscheint `appliance certificate is current`;
-es findet dann weder eine neue ACME-Anforderung noch ein Container-Reconfigure statt.
+A successful rerun reuses the image and infrastructure. When a current direct
+certificate is installed, the output contains `appliance certificate is current`;
+no new ACME order or container reconfiguration is performed.
 
-## Detaillierter technischer Ablauf
+## Detailed technical workflow
 
-### 1. OVA-Analyse und Vorabvalidierung
+### 1. OVA inspection and pre-validation
 
-Der Installer berechnet den SHA-256 über das vollständige OVA und liest die OVF-
-Metadaten. Er lehnt unter anderem zu kleine Boot- oder Scratch-Volumes, unbekannte
-Availability Zones und Machine Types mit zu wenig CPU oder RAM vor dem Image-Upload
-ab. Ohne explizite Availability Zone wird bevorzugt eine Zone mit dem Suffix `-m`
-ausgewählt; ohne Machine Type wird der kleinste passende Typ gewählt.
+The installer calculates SHA-256 over the complete OVA and reads OVF metadata. It
+rejects undersized boot or scratch volumes, unknown availability zones, and machine
+types with insufficient CPU or RAM before uploading the image. Without an explicit
+availability zone, it prefers a zone ending in `-m`. Without a machine type, it
+selects the smallest suitable type.
 
-### 2. Image-Suche und Wiederverwendung
+### 2. Image discovery and reuse
 
-Das OVA wird über das Label `coriolis-sha256` identifiziert. Wegen des STACKIT-
-Label-Limits werden die ersten 32 Hex-Zeichen gespeichert. Ein verwendbares Image
-trägt zusätzlich `coriolis-normalized=agent-v2`.
+The OVA is identified with the `coriolis-sha256` label. Because of the STACKIT
+label length limit, the first 32 hexadecimal characters are stored. A usable image
+also carries `coriolis-normalized=agent-v2`.
 
-Die Suchreihenfolge ist:
+The search order is:
 
-1. lokales, verfügbares Image im Zielprojekt;
-2. für das Zielprojekt sichtbares, geteiltes Image;
-3. ein noch laufender eigener Image-Import;
-4. Suche beziehungsweise Import im konfigurierten Image-Eigentümerprojekt.
+1. an available local image in the target project;
+2. a shared image visible to the target project;
+3. an image import that is still running;
+4. lookup or import in the configured image-owner project.
 
-Ein explizites `image.id` umgeht die automatische Auswahl, muss bei aktiviertem
-Agent-Ablauf aber ebenfalls als `agent-v2` normalisiert sein. Ein `CREATING`-Import
-wird beobachtet; ein eigener, seit mehr als 30 Minuten unveränderter Import wird als
-stale entfernt und neu erzeugt.
+An explicit `image.id` bypasses automatic selection but must also be normalized as
+`agent-v2` when the agent workflow is enabled. A `CREATING` import is monitored. An
+owned import that has not changed for more than 30 minutes is considered stale,
+removed, and recreated.
 
-### 3. Normalisierung auf der Hilfs-VM
+### 3. Normalization on the helper VM
 
-Nur wenn kein geeignetes Image existiert, legt der Installer temporäre Ressourcen an:
+Only when no suitable image exists, the installer creates:
 
-- eine Ubuntu-Hilfs-VM mit Server Agent;
-- ein Quellvolume in Größe der späteren Boot-Disk;
-- ein Scratchvolume für eingehende VMDK und ausgehende QCOW2-Datei;
-- eine temporäre Public IP, Security Group und ein einmaliges Ed25519-Keypair.
+- an Ubuntu helper VM with Server Agent;
+- a source volume sized like the future boot disk;
+- a scratch volume for the incoming VMDK and outgoing QCOW2;
+- a temporary public IP, security group, and one-time Ed25519 key pair.
 
-Der SSH-Hostkey der Hilfs-VM wird zuerst über den unabhängigen STACKIT Server Agent
-ausgelesen. Der anschließende Go-SSH-Transfer akzeptiert ausschließlich diesen
-gepinnten Hostkey. Ein abgebrochener VMDK-Transfer wird anhand der bereits übertragenen
-Bytezahl fortgesetzt.
+The helper VM SSH host key is first retrieved through the independent STACKIT
+Server Agent. The subsequent Go SSH transfer accepts only that pinned host key. An
+interrupted VMDK transfer resumes at the existing byte offset.
 
-Auf der Hilfs-VM geschieht anschließend:
+The helper VM then performs:
 
-1. Installation von `qemu-utils`;
-2. VMDK → RAW direkt auf das performante Quellvolume;
-3. schreibbares Einhängen der Appliance-Rootpartition;
-4. Offline-Installation und Aktivierung des STACKIT Server Agent;
-5. Entfernen ausschließlich maschinenspezifischer Agent- und Cloud-init-Zustände;
-6. RAW → QCOW2 auf das Scratchvolume;
-7. Prüfung des QCOW2 und Upload über die STACKIT-Image-Upload-URL;
-8. Warten auf den Image-Status `AVAILABLE`.
+1. installation of `qemu-utils`;
+2. VMDK to RAW conversion directly onto the high-performance source volume;
+3. writable mounting of the appliance root partition;
+4. offline installation and activation of the STACKIT Server Agent;
+5. removal of machine-specific agent and cloud-init state only;
+6. RAW to QCOW2 conversion on the scratch volume;
+7. QCOW2 validation and upload through the STACKIT image upload URL;
+8. waiting for image status `AVAILABLE`.
 
-Das Original-OVA bleibt unverändert. Coriolis-Konfiguration, Support-SSH und
-Appliance-Anwendungsdaten werden bei der Normalisierung nicht verändert.
+The source OVA remains unchanged. Coriolis configuration, support SSH, and
+appliance application data are not modified during normalization.
 
-Nach erfolgreichem Import werden die Hilfs-VM, die beiden Volumes, die temporäre
-Public IP, Security Group und das Keypair entfernt. Bei einem frühen Fehler bleiben
-gelabelte Volumes gegebenenfalls für Diagnose und Wiederaufnahme erhalten. Ein
-Folgelauf erkennt sie und bereinigt veraltete Hilfszugänge.
+After a successful import, the helper VM, both volumes, temporary public IP,
+security group, and key pair are deleted. After an early failure, labelled volumes
+may remain for diagnosis and recovery. A subsequent run discovers them and removes
+stale helper access.
 
-### 4. Server, Netzwerk und Storage
+### 4. Server, network, and storage
 
-Netzwerk und Security Group werden anhand ihrer Namen wiederverwendet, sofern keine
-Netzwerk-ID vorgegeben wurde. Die Appliance-VM wird anhand von `server.id` oder
-`server.name` gefunden. Eine neue VM erhält das normalisierte Image als Bootquelle,
-die konfigurierte Performanceklasse und den Server Agent.
+Network and security group are reused by name unless a network ID is supplied. The
+appliance VM is found by `server.id` or `server.name`. A new VM uses the normalized
+image as its boot source, the configured performance class, and the Server Agent.
 
-Für die Appliance sowie die Normalisierungsvolumes ist
-`storage_premium_perf12` der empfohlene Default. Konvertierung, Image-Upload,
-Migrationen und Backups erzeugen anhaltende I/O-Last; `perf1` ist für diese Datenpfade
-häufig zu langsam. Nur die kleine Betriebssystemdisk der Hilfs-VM verwendet fest
-`storage_premium_perf1`, weil die Nutzdaten auf den separaten perf12-Volumes liegen.
+`storage_premium_perf12` is the recommended default for the appliance and
+normalization volumes. Conversion, image upload, migrations, and backups create
+sustained I/O load; `perf1` is often too slow for these paths. Only the small helper
+OS disk uses `storage_premium_perf1`, because all payload I/O is placed on separate
+perf12 volumes.
 
-### 5. Appliance-Bootstrap
+### 5. Appliance bootstrap
 
-Nach dem Boot wartet der Installer auf den STACKIT Server Agent und führt den
-Bootstrap über Run Command im Basisbetriebssystem aus. Der Coriolis-Support-SSH-
-Dienst, dessen Accounts und dessen Konfiguration werden nicht verändert.
+After boot, the installer waits for the STACKIT Server Agent and runs bootstrap in
+the base operating system through Run Command. The Coriolis support SSH service,
+its accounts, and its configuration are not changed.
 
-Der Bootstrap:
+Bootstrap:
 
-- setzt den Hostnamen;
-- wartet auf Keystone;
-- setzt das Kennwort des Coriolis-Administrators `admin`;
-- aktualisiert die lokale OpenRC-Datei;
-- führt die herstellereigene Exposure-Logik aus;
-- speichert Kennwort und Idempotenzmarker unter `/var/lib/coriolis-stackit` mit
-  Root-only-Berechtigungen.
+- sets the hostname;
+- waits for Keystone;
+- sets the password of the Coriolis `admin` user;
+- updates the local OpenRC file;
+- invokes the vendor exposure logic;
+- stores the password and idempotency marker below `/var/lib/coriolis-stackit`
+  with root-only permissions.
 
-Ist `bootstrap.admin_password` leer, wird einmalig ein zufälliges, Appliance-
-spezifisches Kennwort erzeugt. Wiederholungen liefern dasselbe Kennwort zurück.
+If `bootstrap.admin_password` is empty, a random appliance-specific password is
+generated once. Reruns return the same password.
 
-### 6. Public IP und DNS
+### 6. Public IP and DNS
 
-Im Direct-Modus verwendet der Installer in dieser Reihenfolge:
+In direct mode, the installer uses this order:
 
-1. eine bereits an der Appliance-NIC vorhandene Public IP;
-2. die über `public_ip_id` oder `public_ip_address` verlangte freie IP;
-3. eine freie, vom Installer verwaltete Public IP;
-4. eine neu reservierte Public IP.
+1. a public IP already attached to the appliance NIC;
+2. the free IP requested through `public_ip_id` or `public_ip_address`;
+3. a free installer-managed public IP;
+4. a newly reserved public IP.
 
-Eine verlangte IP, die an eine andere NIC gebunden ist, führt zum sicheren Abbruch.
-Der A-Record wird angelegt oder auf die aktuelle Adresse aktualisiert. Eine DNS-Zone
-kann über ID oder Namen ausgewählt und bei `create_zone: true` automatisch erzeugt
-werden.
+A requested IP attached to another NIC causes a safe failure. The A record is
+created or updated to the current address. A DNS zone can be selected by ID or
+name and created automatically with `create_zone: true`.
 
-### 7. Öffentlich vertrauenswürdiges Zertifikat
+### 7. Publicly trusted certificate
 
-Im empfohlenen Direct-Modus erzeugt die Appliance selbst einen RSA-Schlüssel und
-einen CSR für den FQDN. Der private Schlüssel verlässt die VM nie. Das Go-Programm
-führt die ACME-DNS-01-Challenge über STACKIT DNS aus und überträgt nur Leaf- und
-Issuer-Zertifikate zurück auf die Appliance.
+In recommended direct mode, the appliance generates its own RSA private key and a
+CSR for the FQDN. The private key never leaves the VM. The Go program completes the
+ACME DNS-01 challenge through STACKIT DNS and returns only leaf and issuer
+certificates to the appliance.
 
-Vor der Aktivierung werden Hostname, Restlaufzeit, Key-Paar und vollständige Chain
-geprüft. Der Installer sichert die aktiven Herstellerdateien, installiert die neue
-Kette und ruft `expose_coriolis.py` mit der privaten Interface-IP auf. Anschließend
-werden ausschließlich `coriolis-web-proxy` und `coriolis-api` neu geladen. Die
-tatsächlich auf 443 und 5000 ausgelieferten Leaf-Fingerprints müssen mit der aktiven
-Datei übereinstimmen. Bei einem Fehler wird auf die gesicherten Dateien und den
-vorherigen Hostnamen zurückgerollt.
+Before activation, the installer verifies hostname, remaining lifetime, key pair,
+and complete chain. It backs up active vendor files, installs the new chain, and
+runs `expose_coriolis.py` with the private interface address. Only
+`coriolis-web-proxy` and `coriolis-api` are then reloaded. The leaf fingerprints
+actually served on ports 443 and 5000 must match the active file. On failure, the
+installer restores the backup and previous hostname.
 
-Ein gültiges Zertifikat wird wiederverwendet. Auch wenn die Datei bereits korrekt,
-der Dienst aber noch nicht neu geladen ist, wird das vorhandene Key-Paar genutzt;
-es wird dafür kein unnötiges neues Zertifikat angefordert.
+A valid certificate is reused. If the file is correct but a service has not yet
+reloaded it, the existing key pair is reused without requesting another certificate.
 
-### 8. Optionaler Application Load Balancer
+### 8. Optional Application Load Balancer
 
-Mit `exposure.mode: application_load_balancer` terminiert ein STACKIT ALB HTTPS auf
-Port 443. Das Zertifikat wird per DNS-01 ausgestellt und im STACKIT Certificate
-Service gespeichert. Der ALB leitet standardmäßig unverschlüsselt auf Port 80 der
-privaten Appliance-IP weiter.
+With `exposure.mode: application_load_balancer`, a STACKIT ALB terminates HTTPS on
+port 443. The certificate is issued through DNS-01 and stored in STACKIT Certificate
+Service. By default, the ALB forwards unencrypted HTTP to port 80 on the private
+appliance address.
 
-Der ALB ist optional. Für den Standardfall wird das Zertifikat direkt in der
-Appliance installiert, damit Weboberfläche und Coriolis-Dienste möglichst nah am
-Herstellerprodukt bleiben. Der ALB betrifft nur den konfigurierten Layer-7-Webpfad;
-Migrations- und Worker-Verbindungen werden nicht automatisch durch ihn geführt.
+The ALB is optional. Direct certificate installation keeps the default deployment
+closer to the vendor product. The ALB covers only the configured Layer 7 web path;
+migration and worker connections are not routed through it automatically.
 
-## Vollständige YAML-Referenz
+## Complete YAML reference
 
-### Allgemein
+### General
 
-| Schlüssel | Bedeutung | Default |
+| Key | Meaning | Default |
 |---|---|---|
-| `project_id` | STACKIT-Zielprojekt | erforderlich |
-| `credentials` | Pfad zum Service-Account-Key | erforderlich |
-| `ova` | Pfad zur Coriolis-OVA | erforderlich |
-| `region` | STACKIT-Region | `eu01` |
-| `timeout` | Maximale Gesamtlaufzeit | `90m` |
-| `poll_interval` | Pollingintervall für asynchrone Ressourcen | `15s` |
-| `upload_attempts` | Transferwiederholungen | `3` |
+| `project_id` | STACKIT target project | required |
+| `credentials` | Service account key path | required |
+| `ova` | Coriolis OVA path | required |
+| `region` | STACKIT region | `eu01` |
+| `timeout` | Maximum total runtime | `90m` |
+| `poll_interval` | Polling interval for asynchronous resources | `15s` |
+| `upload_attempts` | Transfer attempts | `3` |
 
-Bei sehr großen Images oder langsamer Anbindung sollte `timeout` erhöht werden.
+Increase `timeout` for very large images or slow connections.
 
-### `agent` und `bootstrap`
+### `agent` and `bootstrap`
 
-| Schlüssel | Bedeutung | Default |
+| Key | Meaning | Default |
 |---|---|---|
-| `agent.enabled` | Server-Agent-Management aktivieren | `true` |
-| `agent.enable_service` | Run Command Service im Projekt bei Bedarf automatisch aktivieren | `true` |
-| `bootstrap.enabled` | Hostname und Admin-Kennwort konfigurieren | `true` |
-| `bootstrap.admin_password` | Festes Admin-Kennwort; leer erzeugt ein zufälliges | leer |
-| `bootstrap.print_generated_password` | Generiertes Kennwort im Ergebnis ausgeben | `true` |
+| `agent.enabled` | Enable Server Agent management | `true` |
+| `agent.enable_service` | Automatically enable Run Command in the project | `true` |
+| `bootstrap.enabled` | Configure hostname and admin password | `true` |
+| `bootstrap.admin_password` | Fixed password; empty generates a random one | empty |
+| `bootstrap.print_generated_password` | Include generated password in result | `true` |
 
-Für die vollständige Automatisierung müssen Agent und Bootstrap aktiviert bleiben.
-Zur automatischen Einrichtung neuer Projekte muss außerdem `agent.enable_service`
-aktiviert bleiben und der Service Account die Rolle `Project Editor` besitzen.
-Ein festes Kennwort in YAML liegt dort im Klartext; die Datei muss entsprechend
-geschützt werden. Für Kommandozeilenwerte gilt zusätzlich das Risiko der Shell-History.
+Keep agent and bootstrap enabled for complete automation. Automatic setup of new
+projects also requires `agent.enable_service` and the `Project Editor` role. A
+fixed password in YAML is plain text; protect the file accordingly. CLI values may
+also be retained in shell history.
 
 ### `normalization`
 
-| Schlüssel | Bedeutung | Default |
+| Key | Meaning | Default |
 |---|---|---|
-| `performance_class` | Performanceklasse für Quell- und Scratchvolume | `storage_premium_perf12` |
-| `scratch_size_gib` | Größe des Scratchvolumes | `64` |
-| `helper_image_id` | Öffentliches Ubuntu-Image der Hilfs-VM | regionsabhängige ID im Beispiel |
-| `helper_machine_type` | Machine Type der Hilfs-VM | `g1a.1d` |
-| `helper_boot_size_gib` | Boot-Disk der Hilfs-VM | `16` |
+| `performance_class` | Source and scratch volume performance | `storage_premium_perf12` |
+| `scratch_size_gib` | Scratch volume size | `64` |
+| `helper_image_id` | Public Ubuntu helper image | region-specific ID in example |
+| `helper_machine_type` | Helper VM machine type | `g1a.1d` |
+| `helper_boot_size_gib` | Helper OS disk size | `16` |
 
-Das Scratchvolume muss mindestens die virtuelle Diskgröße plus die komprimierte
-VMDK-Größe und 2 GiB Reserve aufnehmen. Der Installer prüft dies vor Cloud-Änderungen.
+The scratch volume must hold the virtual disk size, compressed VMDK size, and a
+2 GiB reserve. The installer validates this before cloud changes.
 
 ### `image`
 
-| Schlüssel | Bedeutung | Default |
+| Key | Meaning | Default |
 |---|---|---|
-| `id` | Explizite vorhandene Image-ID | leer |
-| `owner_project_id` | Zentrales Image-Eigentümerprojekt | Zielprojekt |
-| `name_prefix` | Präfix neuer Images | `coriolis-appliance` |
-| `disk_bus` | Virtueller Disk-Bus | `virtio` |
-| `nic_model` | Virtuelles NIC-Modell | `virtio` |
-| `uefi` | UEFI aktivieren | `false` |
-| `secure_boot` | Secure Boot aktivieren | `false` |
-| `share.parent_organization` | Mit gesamter Parent Organization teilen | `false` |
-| `share.project_ids` | Liste expliziter Consumer-Projekte | `[]` |
+| `id` | Explicit existing image ID | empty |
+| `owner_project_id` | Central image-owner project | target project |
+| `name_prefix` | Prefix for new images | `coriolis-appliance` |
+| `disk_bus` | Virtual disk bus | `virtio` |
+| `nic_model` | Virtual NIC model | `virtio` |
+| `uefi` | Enable UEFI | `false` |
+| `secure_boot` | Enable Secure Boot | `false` |
+| `share.parent_organization` | Share with entire parent organization | `false` |
+| `share.project_ids` | Explicit consumer project IDs | `[]` |
 
-`parent_organization` und `project_ids` schließen sich gegenseitig aus.
+`parent_organization` and `project_ids` are mutually exclusive.
 
 ### `server`
 
-| Schlüssel | Bedeutung | Default |
+| Key | Meaning | Default |
 |---|---|---|
-| `id` | Vorhandenen Server ausdrücklich übernehmen | leer |
-| `name` | Name der Appliance und Suchschlüssel | `coriolis-appliance` |
-| `machine_type` | Gewünschter Machine Type | `c1a.4d` |
-| `availability_zone` | Gewünschte Availability Zone | automatisch, im Beispiel `eu01-m` |
-| `boot_volume_size_gib` | Größe des Boot-Volumes | `48` |
-| `performance_class` | Performanceklasse des Boot-Volumes | `storage_premium_perf12` |
-| `keypair_name` | Optionales vorhandenes Keypair | leer |
-| `delete_boot_volume_on_termination` | Boot-Volume beim Löschen der VM löschen | `false` |
+| `id` | Explicitly adopt an existing server | empty |
+| `name` | Appliance name and discovery key | `coriolis-appliance` |
+| `machine_type` | Requested machine type | `c1a.4d` |
+| `availability_zone` | Requested availability zone | automatic; example uses `eu01-m` |
+| `boot_volume_size_gib` | Boot volume size | `48` |
+| `performance_class` | Boot volume performance | `storage_premium_perf12` |
+| `keypair_name` | Optional existing key pair | empty |
+| `delete_boot_volume_on_termination` | Delete boot volume with VM | `false` |
 
-Die Boot-Disk darf nicht kleiner als die im OVF deklarierte Disk sein. Ein Keypair
-aktiviert nicht automatisch den Coriolis-Support-SSH-Dienst.
+The boot disk must not be smaller than the disk declared in the OVF. A key pair
+does not automatically enable the Coriolis support SSH service.
 
-### `network` und `security_group`
+### `network` and `security_group`
 
-| Schlüssel | Bedeutung | Default |
+| Key | Meaning | Default |
 |---|---|---|
-| `network.id` | Vorhandenes Netzwerk verbindlich verwenden | leer |
-| `network.name` | Netzwerk suchen oder neu anlegen | `coriolis-network` |
-| `network.ipv4_prefix` | Prefix eines neu angelegten Netzwerks | `10.1.100.0/24` |
-| `network.routed` | Geroutetes Netzwerk anlegen | `true` |
-| `security_group.name` | Security-Group-Name | `coriolis-security` |
-| `security_group.ingress[]` | Gewünschte Ingress-Regeln | TCP/443 aus dem Beispiel-CIDR |
+| `network.id` | Require a specific existing network | empty |
+| `network.name` | Find or create a network by name | `coriolis-network` |
+| `network.ipv4_prefix` | Prefix for a new network | `10.1.100.0/24` |
+| `network.routed` | Create a routed network | `true` |
+| `security_group.name` | Security group name | `coriolis-security` |
+| `security_group.ingress[]` | Desired ingress rules | TCP/443 from example CIDR |
 
-Eine Ingress-Regel enthält `protocol`, `port`, `cidr` und eine eindeutige
-`description`. Fehlende Regeln werden ergänzt; vorhandene Regeln werden nicht
-automatisch entfernt. Für produktive Installationen sollte TCP/443 auf bekannte
-Administrator-, Proxy- oder VPN-Netze begrenzt werden, sofern kein öffentlicher
-Zugriff benötigt wird.
+An ingress rule contains `protocol`, `port`, `cidr`, and a unique `description`.
+Missing rules are added; existing rules are not removed. For production, restrict
+TCP/443 to known administrator, proxy, or VPN ranges unless public access is needed.
 
-### Public IP und DNS
+### Public IP and DNS
 
-| Schlüssel | Bedeutung | Default |
+| Key | Meaning | Default |
 |---|---|---|
-| `public_ip` | Public IP im Direct-Modus sicherstellen | `true` |
-| `public_ip_id` | Bestimmte reservierte Public IP per ID verwenden | leer |
-| `public_ip_address` | Bestimmte reservierte Public IP per Adresse verwenden | leer |
-| `dns.enabled` | DNS verwalten | `false` im Code, im Beispiel aktiviert |
-| `dns.create_zone` | Fehlende Zone anlegen | `false` |
-| `dns.zone_id` | Vorhandene Zone per ID | leer |
-| `dns.zone_name` | Zonenname oder DNS-Name | erforderlich, wenn keine ID gesetzt ist |
-| `dns.record_name` | Hostname oder vollständiger FQDN | erforderlich bei aktiviertem DNS |
-| `dns.ttl` | TTL des A-Records | `300` |
+| `public_ip` | Ensure a public IP in direct mode | `true` |
+| `public_ip_id` | Use a specific reserved public IP by ID | empty |
+| `public_ip_address` | Use a specific reserved public IP by address | empty |
+| `dns.enabled` | Manage DNS | `false` in code; enabled in example |
+| `dns.create_zone` | Create a missing zone | `false` |
+| `dns.zone_id` | Existing zone ID | empty |
+| `dns.zone_name` | Zone name or DNS name | required without an ID |
+| `dns.record_name` | Hostname or full FQDN | required when DNS is enabled |
+| `dns.ttl` | A-record TTL | `300` |
 
-Ein direkt installiertes Zertifikat benötigt DNS und eine Public IP. Im ALB-Modus
-zeigt der A-Record auf die externe Adresse des Load Balancers.
+A directly installed certificate requires DNS and a public IP. In ALB mode, the A
+record points to the load balancer's external address.
 
 ### `exposure`
 
-| Schlüssel | Bedeutung | Default |
+| Key | Meaning | Default |
 |---|---|---|
-| `mode` | `direct` oder `application_load_balancer` | `direct` |
-| `certificate.enabled` | Zertifikat direkt in der Appliance verwalten | `false` |
-| `certificate.email` | ACME-Kontaktadresse | erforderlich bei Zertifikatsnutzung |
-| `certificate.staging` | Let's-Encrypt-Staging verwenden | `false` |
-| `certificate.renew_before_days` | Erneuerungsfenster | `30` |
-| `certificate.name_prefix` | Präfix im Certificate Service, nur ALB | `coriolis-tls` |
-| `load_balancer.name` | Name des ALB | `coriolis-alb` |
-| `load_balancer.plan_id` | STACKIT-ALB-Plan | `p10` |
-| `load_balancer.backend_port` | Port der Appliance | `80` |
-| `load_balancer.health_check_path` | HTTP-Health-Check-Pfad | `/` |
+| `mode` | `direct` or `application_load_balancer` | `direct` |
+| `certificate.enabled` | Manage certificate directly on appliance | `false` |
+| `certificate.email` | ACME contact address | required when using certificates |
+| `certificate.staging` | Use Let's Encrypt staging | `false` |
+| `certificate.renew_before_days` | Renewal window | `30` |
+| `certificate.name_prefix` | Certificate Service prefix; ALB only | `coriolis-tls` |
+| `load_balancer.name` | ALB name | `coriolis-alb` |
+| `load_balancer.plan_id` | STACKIT ALB plan | `p10` |
+| `load_balancer.backend_port` | Appliance backend port | `80` |
+| `load_balancer.health_check_path` | HTTP health-check path | `/` |
 
-Für erste ACME-Tests sollte `certificate.staging: true` verwendet werden. Erst nach
-einem erfolgreichen Ablauf sollte auf die produktive CA umgestellt werden, um
-Rate-Limits zu vermeiden.
+Use `certificate.staging: true` for initial ACME tests. Switch to the production CA
+only after a successful test to avoid rate limits.
 
-## CLI-Überschreibungen
+## CLI overrides
 
-CLI-Parameter überschreiben die entsprechenden YAML-Werte:
+CLI flags override the corresponding YAML values:
 
-| Parameter | YAML-Ziel |
+| Flag | YAML target |
 |---|---|
 | `--project-id` | `project_id` |
 | `--credentials` | `credentials` |
@@ -629,7 +616,7 @@ CLI-Parameter überschreiben die entsprechenden YAML-Werte:
 | `--image-id` | `image.id` |
 | `--image-owner-project-id` | `image.owner_project_id` |
 | `--share-image-with-organization` | `image.share.parent_organization: true` |
-| `--share-image-with-projects` | `image.share.project_ids`, kommasepariert |
+| `--share-image-with-projects` | comma-separated `image.share.project_ids` |
 | `--server-id` | `server.id` |
 | `--availability-zone` | `server.availability_zone` |
 | `--machine-type` | `server.machine_type` |
@@ -641,20 +628,20 @@ CLI-Parameter überschreiben die entsprechenden YAML-Werte:
 | `--normalization-helper-machine-type` | `normalization.helper_machine_type` |
 | `--normalization-helper-boot-size` | `normalization.helper_boot_size_gib` |
 | `--network-id` | `network.id` |
-| `--public-ip-id` | `public_ip_id`, aktiviert zugleich `public_ip` |
-| `--public-ip-address` | `public_ip_address`, aktiviert zugleich `public_ip` |
+| `--public-ip-id` | `public_ip_id`; also enables `public_ip` |
+| `--public-ip-address` | `public_ip_address`; also enables `public_ip` |
 | `--dns-zone-id` | `dns.zone_id` |
 | `--dns-zone-name` | `dns.zone_name` |
-| `--dns-name` | `dns.record_name`, aktiviert zugleich DNS |
-| `--certificate-email` | `exposure.certificate.email`, aktiviert im Direct-Modus das Zertifikat |
-| `--admin-password` | `bootstrap.admin_password`, aktiviert zugleich Bootstrap |
+| `--dns-name` | `dns.record_name`; also enables DNS |
+| `--certificate-email` | `exposure.certificate.email`; enables direct certificate |
+| `--admin-password` | `bootstrap.admin_password`; also enables bootstrap |
 | `--enable-run-command-service` | `agent.enable_service=true` |
 | `--disable-run-command-service-activation` | `agent.enable_service=false` |
-| `--dry-run` | Nur lokale Validierung und Plan-Ausgabe |
-| `--check-cloud` | Read-only-Cloud-Prüfung |
-| `--version` | Build-Version ausgeben |
+| `--dry-run` | Local validation and plan only |
+| `--check-cloud` | Read-only cloud validation |
+| `--version` | Print build version |
 
-Beispiel ohne YAML für die drei Pflichtwerte:
+Example without YAML for the three required values:
 
 ```bash
 ./bin/coriolis-stackit \
@@ -663,28 +650,28 @@ Beispiel ohne YAML für die drei Pflichtwerte:
   --ova coriolis-appliance-stackit-0.ova
 ```
 
-Für alle weiteren Werte gelten die Defaults. Für reproduzierbare Installationen wird
-eine versionierte YAML-Datei ohne Secrets empfohlen.
+All other values use defaults. For reproducible deployments, prefer a versioned
+YAML file that does not contain secrets.
 
-## Typische Nutzungsszenarien
+## Common scenarios
 
-### Vorhandene Public IP verwenden
+### Use an existing public IP
 
-Per ID:
+By ID:
 
 ```yaml
 public_ip: true
 public_ip_id: 00000000-0000-0000-0000-000000000000
 ```
 
-Oder per Adresse:
+Or by address:
 
 ```yaml
 public_ip: true
 public_ip_address: 192.0.2.10
 ```
 
-### Zentrales Image-Projekt
+### Central image project
 
 ```yaml
 image:
@@ -694,11 +681,11 @@ image:
       - 22222222-2222-2222-2222-222222222222
 ```
 
-Fehlt das Image, normalisiert der Installer das OVA im Eigentümerprojekt. Das
-aktuelle Zielprojekt wird automatisch als Consumer ergänzt, sofern nicht mit der
-gesamten Parent Organization geteilt wird.
+If the image is missing, the installer normalizes the OVA in the owner project.
+The current target project is added as a consumer unless the image is shared with
+the entire parent organization.
 
-Organisationsweite Freigabe:
+Organization-wide sharing:
 
 ```yaml
 image:
@@ -707,17 +694,17 @@ image:
     parent_organization: true
 ```
 
-### Vorhandenes normalisiertes Image explizit verwenden
+### Explicitly use an existing normalized image
 
 ```yaml
 image:
   id: 33333333-3333-3333-3333-333333333333
 ```
 
-Die OVA bleibt trotzdem erforderlich, weil ihr Hash und ihre Hardwareanforderungen
-für Validierung und Zuordnung verwendet werden.
+The OVA is still required because its hash and hardware requirements are used for
+validation and resource matching.
 
-### Bestehenden Server übernehmen
+### Adopt an existing server
 
 ```yaml
 server:
@@ -725,17 +712,17 @@ server:
   name: coriolis-appliance
 ```
 
-Der Installer ersetzt das Boot-Volume nicht und verändert weder Appliance-ID noch
-Coriolis-Daten oder Lizenz. Er verlangt aber, dass der Server am konfigurierten
-Netzwerk hängt, und ergänzt die Security Group bei Bedarf.
+The installer does not replace the boot volume and does not change appliance ID,
+Coriolis data, or license. It requires the server to be attached to the configured
+network and adds the security group when necessary.
 
-Wichtig: Aktivierter Bootstrap oder Zertifikatsbetrieb verändert anschließend
-Hostname, Admin-Kennwort beziehungsweise TLS-Konfiguration des übernommenen Servers.
-Vor der erstmaligen Übernahme einer produktiven, lizenzierten Appliance ist deshalb
-ein Volume-Backup erforderlich. Für Agent-gesteuerte Schritte muss auf dem bestehenden
-Server bereits ein funktionsfähiger STACKIT Server Agent vorhanden sein.
+Important: enabled bootstrap or certificate management subsequently changes the
+hostname, admin password, or TLS configuration of the adopted server. Create a
+volume backup before adopting a licensed production appliance for the first time.
+Agent-controlled operations also require a working STACKIT Server Agent on that
+server.
 
-### Optionaler ALB
+### Optional ALB
 
 ```yaml
 dns:
@@ -758,137 +745,133 @@ exposure:
     health_check_path: /
 ```
 
-## Idempotenz und Verhalten bei Fehlern
+## Idempotency and failure behavior
 
-Der Installer verwendet keine lokale State-Datei. Er erkennt Ressourcen über IDs,
-Namen, Beziehungen und Labels wie `managed-by`, `coriolis-sha256` und
+The installer has no local state file. It discovers resources through IDs, names,
+relationships, and labels such as `managed-by`, `coriolis-sha256`, and
 `coriolis-normalized`.
 
-| Situation | Verhalten |
+| Situation | Behavior |
 |---|---|
-| Image ist bereits verfügbar | Wiederverwenden |
-| Eigenes Image ist noch `CREATING` | Bis zum Endstatus beobachten |
-| Image-Import ist erkennbar stale | Alten Import entfernen und neu starten |
-| VMDK-Transfer wurde unterbrochen | Ab der vorhandenen Byteposition fortsetzen |
-| Normalisierte Volumes sind vorhanden | Für die Fortsetzung wiederverwenden |
-| Servername existiert mit anderem Image-Label | Abbruch, kein impliziter Ersatz |
-| Server ist `ERROR` oder `DELETED` | Abbruch, keine automatische Löschung |
-| Public IP ist bereits an der richtigen NIC | Wiederverwenden |
-| Verlangte Public IP hängt an anderer NIC | Abbruch |
-| DNS-A-Record existiert | Auf gewünschte IP aktualisieren |
-| Admin-Kennwort wurde bereits generiert | Dasselbe Appliance-Kennwort wiederverwenden |
-| Zertifikat und laufender Dienst sind aktuell | Keine ACME- oder Reconfigure-Aktion |
-| Zertifikatseinbau scheitert | Herstellerdateien und Hostname zurückrollen |
-| Run Command liefert vorübergehenden API-Fehler | Polling beziehungsweise Bootstrap begrenzt wiederholen |
+| Image is already available | Reuse it |
+| Owned image is still `CREATING` | Monitor until terminal state |
+| Image import is recognizably stale | Remove and restart it |
+| VMDK transfer was interrupted | Resume at existing byte offset |
+| Normalization volumes exist | Reuse them for recovery |
+| Server name exists with another image label | Fail; never replace implicitly |
+| Server is `ERROR` or `DELETED` | Fail without automatic deletion |
+| Public IP is attached to the correct NIC | Reuse it |
+| Requested public IP belongs to another NIC | Fail safely |
+| DNS A record exists | Update it to the requested IP |
+| Admin password was generated previously | Reuse the same appliance password |
+| Certificate and running service are current | No ACME or reconfigure action |
+| Certificate installation fails | Restore vendor files and hostname |
+| Run Command returns a transient API error | Retry polling or bootstrap within limits |
 
-Bestehende Netzwerke werden nach Namen wiederverwendet; Prefix und Routing eines
-bereits vorhandenen Netzwerks werden nicht automatisch geändert. Security-Group-
-Regeln werden ergänzt, aber nicht entfernt. Eine Änderung dieser Parameter sollte
-daher bewusst mit neuen Ressourcennamen oder administrativ vorbereitet werden.
+Existing networks are reused by name; their prefix and routing are not changed.
+Security-group rules are added but never removed. Prepare such changes explicitly
+or use new resource names.
 
-## Netzwerk- und Sicherheitsmodell
+## Network and security model
 
-### Dauerhafte Ingress-Regeln
+### Permanent ingress rules
 
-Standardmäßig öffnet die Appliance-Security-Group nur TCP/443. SSH wird bewusst
-nicht geöffnet oder umkonfiguriert. Der Coriolis-Support kann seinen vorgesehenen
-SSH-Dienst weiterhin wie vom Hersteller vorgesehen aktivieren und verwenden.
+By default, the appliance security group opens only TCP/443. SSH is deliberately
+not opened or reconfigured. Coriolis support can continue to enable and use its
+vendor-provided SSH service as intended.
 
-Der STACKIT Server Agent benötigt keine Ingress-Regel; er nutzt einen separaten,
-ausgehenden Managementkanal.
+The STACKIT Server Agent needs no ingress rule; it uses a separate outbound
+management channel.
 
-Für Migrationen baut die Appliance die Verbindungen zu Quell- und Ziel-APIs sowie
-temporären Workern überwiegend ausgehend auf. Abhängig vom Provider können unter
-anderem TCP/22, 4433, 5566 und 5986 relevant sein. Remote-Zugriffe auf Coriolis APIs
-oder externe Worker können zusätzliche, eng begrenzte Ingress-Regeln erfordern. Die
-maßgebliche Referenz ist die
-[Coriolis Port Matrix](https://cloudbase.it/coriolis-network-ports-requirements/).
+For migrations, the appliance primarily establishes outbound connections to source
+and target APIs and temporary workers. Depending on the provider, TCP/22, 4433,
+5566, and 5986 may be relevant. Remote access to Coriolis APIs or external workers
+can require additional narrowly scoped ingress rules. Refer to the
+[Coriolis port matrix](https://cloudbase.it/coriolis-network-ports-requirements/).
 
-### Temporärer SSH-Zugang der Hilfs-VM
+### Temporary helper SSH access
 
-Nur während eines neuen OVA-Imports erzeugt der Installer eine separate Security
-Group für TCP/22 zur Hilfs-VM. Die aktuelle Implementierung erlaubt dort temporär
-`0.0.0.0/0`. Der Zugriff ist ausschließlich mit einem zufälligen Einmal-Key möglich,
-und der Hostkey wird über den Server Agent gepinnt. Nach erfolgreichem Import werden
-Public IP, Keypair und Security Group entfernt. Nach einem Fehler sollte der
-Folgelauf zeitnah gestartet oder die gelabelte Hilfsinfrastruktur kontrolliert
-bereinigt werden.
+Only while importing a new OVA, the installer creates a separate security group
+for TCP/22 to the helper VM. The current implementation temporarily permits
+`0.0.0.0/0`. Access requires a random one-time key, and the host key is pinned
+through Server Agent. Public IP, key pair, and security group are removed after a
+successful import. After an error, rerun promptly or inspect and clean up the
+labelled helper infrastructure.
 
-Dieser temporäre SSH-Kanal gehört nur zur Image-Erstellung. Er verändert und nutzt
-nicht den Support-SSH-Dienst der Coriolis-Appliance.
+This temporary SSH channel is only used for image creation. It neither modifies
+nor uses the Coriolis appliance support SSH service.
 
-### Umgang mit Secrets
+### Secret handling
 
-- Der Service-Account-Key wird nur zur SDK-Authentifizierung gelesen.
-- Credentials werden nicht in die Ergebnisstruktur aufgenommen.
-- Das generierte Admin-Kennwort liegt in der Appliance root-only.
-- Run-Command-Ausgaben mit dem Admin-Kennwort werden nicht live gestreamt.
-- Beim direkten Zertifikat bleibt der TLS-Private-Key auf der Appliance.
-- Hersteller-Reconfigure-Logs werden nicht nach außen gestreamt und nach Abschluss
-  beziehungsweise Rollback entfernt.
-- Ein per `--admin-password` übergebenes Kennwort kann in der Shell-History landen.
+- The service account key is read only for SDK authentication.
+- Credentials are never included in the result structure.
+- The generated admin password is stored root-only on the appliance.
+- Run Command output containing the admin password is not streamed live.
+- With direct certificates, the TLS private key remains on the appliance.
+- Vendor reconfiguration logs are not streamed and are removed after completion
+  or rollback.
+- A password supplied through `--admin-password` may remain in shell history.
 
-## Grenzen und bewusste Schutzmechanismen
+## Limitations and safeguards
 
-- Genau eine Disk pro OVA wird unterstützt.
-- Eine neue OVA führt zu einem neuen Image, aber niemals zum automatischen Austausch
-  einer bestehenden VM.
-- Es gibt keinen automatischen Daten-, Lizenz- oder Coriolis-Upgrade-Workflow.
-- Ein vorhandener Server mit abweichendem Netzwerk wird nicht automatisch umgehängt.
-- Eine fehlerhafte VM wird nicht automatisch gelöscht.
-- Das Tool entfernt keine bestehenden Security-Group-Regeln.
-- Der optionale ALB deckt nur seinen HTTPS-Webpfad ab, nicht sämtliche Coriolis-
-  Migrationsverbindungen.
-- Änderungen an einem vorhandenen ALB sollten nach dem Deployment separat geprüft
-  werden; die Wiederverwendung orientiert sich primär an Name und Zertifikat.
+- Exactly one disk per OVA is supported.
+- A new OVA creates a new image but never replaces an existing VM automatically.
+- There is no automated data, license, or Coriolis application upgrade workflow.
+- An existing server is not moved to another network automatically.
+- A failed VM is not deleted automatically.
+- Existing security-group rules are never removed.
+- The optional ALB covers only its HTTPS web path, not every Coriolis migration
+  connection.
+- Changes to an existing ALB should be verified separately; reuse is primarily
+  based on name and certificate.
 
-Diese Grenzen verhindern, dass ein Wiederholungslauf unbeabsichtigt eine lizenzierte
-oder bereits konfigurierte Appliance ersetzt.
+These safeguards prevent a rerun from unintentionally replacing a licensed or
+already configured appliance.
 
-## Fehleranalyse
+## Troubleshooting
 
-Empfohlene Reihenfolge:
+Recommended order:
 
-1. `--dry-run` ausführen und OVA-/Größenfehler beheben.
-2. `--check-cloud` für Berechtigungen, Region, Zone und Machine Type ausführen.
-3. Quota für Server, Images, Volumes und Public IPs prüfen.
-4. Bei `Service not enabled` sicherstellen, dass `agent.enable_service: true` gesetzt
-   ist und der Service Account die Rolle `Project Editor` besitzt.
-5. Bei einem Transferfehler denselben Installerbefehl erneut ausführen.
-6. Bei DNS-/ACME-Fehlern Zone, Recordname und Service-Account-Rechte prüfen.
-7. Bei einem übernommenen Server prüfen, ob der STACKIT Server Agent aktiv ist.
-8. Keine VM oder Normalisierungsvolumes blind löschen: gelabelte Ressourcen können
-   einen fortsetzbaren Zwischenstand enthalten.
+1. Run `--dry-run` and resolve OVA or sizing errors.
+2. Run `--check-cloud` to validate permissions, region, zone, and machine type.
+3. Check quotas for servers, images, volumes, and public IPs.
+4. For `Service not enabled`, verify `agent.enable_service: true` and the service
+   account's `Project Editor` role.
+5. After a transfer error, rerun the same installer command.
+6. For DNS or ACME errors, verify zone, record name, and service account rights.
+7. When adopting a server, verify that its STACKIT Server Agent is active.
+8. Do not blindly delete a VM or normalization volumes: labelled resources may
+   contain recoverable intermediate state.
 
-Der Installer gibt Fehler mit der betroffenen Phase zurück. Beim Zertifikatseinbau
-werden nur bereinigte Fehlerkategorien ausgegeben; interne Hersteller-Secrets werden
-nicht in das Konsolenlog übernommen.
+Errors identify the affected phase. Certificate installation reports sanitized
+error categories only; internal vendor secrets are not copied into console output.
 
-## Entwicklung
+## Development
 
-### Projektstruktur
+### Project layout
 
 ```text
 .
 ├── cmd/
 │   └── coriolis-stackit/
-│       └── main.go            # schlanker Programmeinstieg
+│       └── main.go            # small executable entry point
 ├── internal/
-│   └── installer/             # Deploymentlogik und Unit-Tests
+│   └── installer/             # deployment logic and unit tests
 ├── examples/
-│   └── config.yaml            # vollständige, secret-freie Beispielkonfiguration
+│   └── config.yaml            # complete, secret-free example
 ├── Makefile
 ├── README.md
+├── README.de.md
 ├── go.mod
 └── go.sum
 ```
 
-`internal/installer` ist absichtlich ein gemeinsames internes Paket: Die Phasen
-teilen Konfiguration, Cloud-Client und Zustandsmodell und bilden keine öffentliche
-Go-Bibliothek. Projektspezifische YAML-Dateien, Credentials, OVAs, Wartungsdaten und
-gebaute Binaries bleiben durch `.gitignore` ausschließlich lokal.
+`internal/installer` intentionally remains one internal package. Its phases share
+configuration, cloud clients, and a state model and do not form a public Go
+library. Project-specific YAML, credentials, OVAs, maintenance artifacts, and built
+binaries remain local through `.gitignore`.
 
-### Bauen und testen
+### Build and test
 
 ```bash
 go test ./...
@@ -896,7 +879,7 @@ go vet ./...
 go build -trimpath -o bin/coriolis-stackit ./cmd/coriolis-stackit
 ```
 
-Oder über das Makefile:
+Or use the Makefile:
 
 ```bash
 make test
@@ -904,7 +887,7 @@ make build
 make check
 ```
 
-Die Cloud-Operationen verwenden die offiziellen STACKIT Go SDKs für IaaS, Run
-Command, DNS, ALB und Certificates. Projektgebundene Diagnose- und
-Integrationstests gehören nicht zum veröffentlichten Quellbestand; sie dürfen nur
-lokal und gegen disposable Testsysteme ausgeführt werden.
+Cloud operations use the official STACKIT Go SDKs for IaaS, Run Command, Service
+Enablement, DNS, ALB, and Certificates. Project-bound diagnostics and integration
+tests are not part of the published source; run them only locally and against
+disposable test systems.
