@@ -315,6 +315,9 @@ func (c *Cloud) waitServerAgent(ctx context.Context, projectID, serverID string)
 		if err == nil {
 			return nil
 		}
+		if strings.Contains(strings.ToLower(err.Error()), "service not enabled") {
+			return fmt.Errorf("wait for STACKIT Server Agent on %s: Run Command service is not enabled in project %s", serverID, projectID)
+		}
 		select {
 		case <-ctx.Done():
 			return fmt.Errorf("wait for STACKIT Server Agent on %s: %w", serverID, ctx.Err())

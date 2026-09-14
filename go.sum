@@ -28,6 +28,8 @@ github.com/stackitcloud/stackit-sdk-go/services/iaas v1.14.1 h1:P8XhOi8TLA7NbLHh
 github.com/stackitcloud/stackit-sdk-go/services/iaas v1.14.1/go.mod h1:/QpOsaCOQjwGgQqG8y9xXqryp25AfkorPjInX9xIeOU=
 github.com/stackitcloud/stackit-sdk-go/services/runcommand v1.10.1 h1:+0dl8HjYKEdhUZEr/7WcugPhNoZzf9PBnsQWJBDLtaY=
 github.com/stackitcloud/stackit-sdk-go/services/runcommand v1.10.1/go.mod h1:fQdqal+Jduk/DY5UUHCefHn5wsRN6uROEFA/O7HObig=
+github.com/stackitcloud/stackit-sdk-go/services/serviceenablement v1.7.2 h1:ne+TBZTWUzIg47X5vRbeyPfJCA1tafIN3R20ADBIu2Q=
+github.com/stackitcloud/stackit-sdk-go/services/serviceenablement v1.7.2/go.mod h1:gmOQuuRATNTmHTuwCsJ6ko1AwHThYpvEkmD2uOYEJCQ=
 github.com/stretchr/testify v1.11.1 h1:7s2iGBzp5EwR7/aIZr8ao5+dra3wiQyKjjFuvgVKu7U=
 github.com/stretchr/testify v1.11.1/go.mod h1:wZwfW3scLgRK+23gO65QZefKpKQRnfz6sD981Nm4B6U=
 golang.org/x/crypto v0.50.0 h1:zO47/JPrL6vsNkINmLoo/PH1gcxpls50DNogFvB5ZGI=

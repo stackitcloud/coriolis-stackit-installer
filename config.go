@@ -51,7 +51,8 @@ type BootstrapConfig struct {
 }
 
 type AgentConfig struct {
-	Enabled bool `yaml:"enabled" json:"enabled"`
+	Enabled       bool `yaml:"enabled" json:"enabled"`
+	EnableService bool `yaml:"enable_service" json:"enable_service"`
 }
 
 // NormalizationConfig controls the temporary block storage used while turning
@@ -145,7 +146,7 @@ func defaultConfig() Config {
 		// Appliance configuration is performed through the STACKIT Server Agent;
 		// the stock appliance does not execute STACKIT user-data reliably.
 		Bootstrap: BootstrapConfig{Enabled: true, PrintGeneratedPassword: true},
-		Agent:     AgentConfig{Enabled: true},
+		Agent:     AgentConfig{Enabled: true, EnableService: true},
 		Normalization: NormalizationConfig{
 			PerformanceClass:  "storage_premium_perf12",
 			ScratchSizeGiB:    64,

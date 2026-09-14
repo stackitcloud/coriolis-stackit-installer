@@ -3,11 +3,14 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+
+	serviceenablement "github.com/stackitcloud/stackit-sdk-go/services/serviceenablement/v1api"
 )
 
 var version = "dev"
@@ -55,6 +58,8 @@ func run(args []string) error {
 	dnsName := fs.String("dns-name", "", "DNS record name; enables DNS")
 	certificateEmail := fs.String("certificate-email", "", "ACME email; enables trusted direct appliance certificate when exposure mode is direct")
 	adminPassword := fs.String("admin-password", "", "initial Coriolis admin password (prefer YAML/env-safe secret handling)")
+	enableRunCommandService := fs.Bool("enable-run-command-service", false, "enable the STACKIT Run Command service in the project")
+	disableRunCommandService := fs.Bool("disable-run-command-service-activation", false, "require an already enabled Run Command service instead of activating it")
 	dry := fs.Bool("dry-run", false, "validate and print the resolved plan without cloud changes")
 	checkCloud := fs.Bool("check-cloud", false, "validate credentials, project, zone and machine type without changes")
 	showVersion := fs.Bool("version", false, "print version")
@@ -156,6 +161,15 @@ func run(args []string) error {
 		c.Bootstrap.AdminPassword = *adminPassword
 		c.Bootstrap.Enabled = true
 	}
+	if *enableRunCommandService && *disableRunCommandService {
+		return errors.New("--enable-run-command-service and --disable-run-command-service-activation are mutually exclusive")
+	}
+	if *enableRunCommandService {
+		c.Agent.EnableService = true
+	}
+	if *disableRunCommandService {
+		c.Agent.EnableService = false
+	}
 	if err := c.validate(); err != nil {
 		return err
 	}
@@ -202,6 +216,18 @@ func run(args []string) error {
 		return err
 	}
 	if *checkCloud {
+		if c.Agent.Enabled {
+			state, err := cloud.runCommandServiceState(ctx, c.ProjectID)
+			if err != nil {
+				return fmt.Errorf("check Run Command service: %w", err)
+			}
+			if state != serviceenablement.SERVICESTATUSSTATE_ENABLED {
+				if !c.Agent.EnableService {
+					return fmt.Errorf("STACKIT Run Command service is %s and automatic activation is disabled", state)
+				}
+				fmt.Fprintf(os.Stderr, "STACKIT Run Command service is %s; deployment will enable it automatically\n", state)
+			}
+		}
 		zoneResolved, err := cloud.chooseZone(ctx, c.Server.AvailabilityZone)
 		if err != nil {
 			return err
@@ -221,6 +247,15 @@ func run(args []string) error {
 			return err
 		}
 		return printJSON(result{ProjectID: c.ProjectID, Region: c.Region, AvailabilityZone: zoneResolved, MachineType: machineResolved, OVAHash: info.SHA256})
+	}
+	if c.Agent.Enabled {
+		if c.Agent.EnableService {
+			if err := cloud.ensureRunCommandService(ctx, c.ProjectID); err != nil {
+				return err
+			}
+		} else if err := cloud.requireRunCommandService(ctx, c.ProjectID); err != nil {
+			return err
+		}
 	}
 	// Validate placement before spending time and quota on conversion/upload.
 	zoneResolved, err := cloud.chooseZone(ctx, c.Server.AvailabilityZone)

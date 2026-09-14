@@ -11,6 +11,9 @@ upload_attempts: 3
 # require the Coriolis support SSH service.
 agent:
   enabled: true
+  # Enable the project-wide Run Command service automatically when necessary.
+  # Requires the Project Editor role for the service account.
+  enable_service: true
 
 # Temporary source and scratch disks perform sustained block copies,
 # conversion, image upload and later backup/restore work. perf1 is normally

@@ -25,6 +25,7 @@ Der Installer kann:
 
 - OVF-Metadaten und SHA-256 des OVA lokal ermitteln;
 - Availability Zone und Machine Type gegen die OVA-Anforderungen prüfen;
+- den STACKIT Run-Command-Dienst bei Bedarf projektweit aktivieren;
 - ein neues oder vorhandenes Netzwerk verwenden;
 - eine Security Group anlegen und fehlende Ingress-Regeln ergänzen;
 - die VMDK ohne lokale Extraktion auf eine temporäre STACKIT-Hilfs-VM streamen;
@@ -54,7 +55,8 @@ ein neues Image ersetzt.
 flowchart TD
     A["Go-Binary, YAML, Credentials und OVA"] --> B["OVA lesen: OVF, SHA-256, CPU, RAM und Disk"]
     B --> C["Konfiguration und STACKIT-Platzierung prüfen"]
-    C --> D["DNS-Zone, Netzwerk und Security Group sicherstellen"]
+    C --> R["Run Command Service prüfen und bei Bedarf aktivieren"]
+    R --> D["DNS-Zone, Netzwerk und Security Group sicherstellen"]
     D --> E{"Passendes normalisiertes Image sichtbar?"}
 
     E -- Ja --> K["Image wiederverwenden und Freigaben ergänzen"]
@@ -138,8 +140,13 @@ erforderlich.
 
 ### STACKIT-Projekt und Berechtigungen
 
-Der STACKIT Server Agent muss für das Projekt aktiviert sein. Der Service Account
-benötigt Lese- und Änderungsrechte für die Ressourcen, die der gewählte Ablauf nutzt:
+Der Installer aktiviert den projektweiten STACKIT Run Command Service standardmäßig
+selbst, bevor er weitere Cloud-Ressourcen anlegt. Dafür benötigt der Service Account
+die Rolle **Project Editor**. Mit `agent.enable_service: false` kann die Aktivierung
+unterdrückt werden; dann muss der Dienst bereits aktiviert sein.
+
+Zusätzlich benötigt der Service Account Lese- und Änderungsrechte für die Ressourcen,
+die der gewählte Ablauf nutzt:
 
 - IaaS: Images, Server, Volumes, Netzwerke, NICs, Security Groups, Public IPs und
   temporäre Keypairs;
@@ -466,11 +473,14 @@ Bei sehr großen Images oder langsamer Anbindung sollte `timeout` erhöht werden
 | Schlüssel | Bedeutung | Default |
 |---|---|---|
 | `agent.enabled` | Server-Agent-Management aktivieren | `true` |
+| `agent.enable_service` | Run Command Service im Projekt bei Bedarf automatisch aktivieren | `true` |
 | `bootstrap.enabled` | Hostname und Admin-Kennwort konfigurieren | `true` |
 | `bootstrap.admin_password` | Festes Admin-Kennwort; leer erzeugt ein zufälliges | leer |
 | `bootstrap.print_generated_password` | Generiertes Kennwort im Ergebnis ausgeben | `true` |
 
 Für die vollständige Automatisierung müssen Agent und Bootstrap aktiviert bleiben.
+Zur automatischen Einrichtung neuer Projekte muss außerdem `agent.enable_service`
+aktiviert bleiben und der Service Account die Rolle `Project Editor` besitzen.
 Ein festes Kennwort in YAML liegt dort im Klartext; die Datei muss entsprechend
 geschützt werden. Für Kommandozeilenwerte gilt zusätzlich das Risiko der Shell-History.
 
@@ -604,6 +614,8 @@ CLI-Parameter überschreiben die entsprechenden YAML-Werte:
 | `--dns-name` | `dns.record_name`, aktiviert zugleich DNS |
 | `--certificate-email` | `exposure.certificate.email`, aktiviert im Direct-Modus das Zertifikat |
 | `--admin-password` | `bootstrap.admin_password`, aktiviert zugleich Bootstrap |
+| `--enable-run-command-service` | `agent.enable_service=true` |
+| `--disable-run-command-service-activation` | `agent.enable_service=false` |
 | `--dry-run` | Nur lokale Validierung und Plan-Ausgabe |
 | `--check-cloud` | Read-only-Cloud-Prüfung |
 | `--version` | Build-Version ausgeben |
@@ -806,10 +818,12 @@ Empfohlene Reihenfolge:
 1. `--dry-run` ausführen und OVA-/Größenfehler beheben.
 2. `--check-cloud` für Berechtigungen, Region, Zone und Machine Type ausführen.
 3. Quota für Server, Images, Volumes und Public IPs prüfen.
-4. Bei einem Transferfehler denselben Installerbefehl erneut ausführen.
-5. Bei DNS-/ACME-Fehlern Zone, Recordname und Service-Account-Rechte prüfen.
-6. Bei einem übernommenen Server prüfen, ob der STACKIT Server Agent aktiv ist.
-7. Keine VM oder Normalisierungsvolumes blind löschen: gelabelte Ressourcen können
+4. Bei `Service not enabled` sicherstellen, dass `agent.enable_service: true` gesetzt
+   ist und der Service Account die Rolle `Project Editor` besitzt.
+5. Bei einem Transferfehler denselben Installerbefehl erneut ausführen.
+6. Bei DNS-/ACME-Fehlern Zone, Recordname und Service-Account-Rechte prüfen.
+7. Bei einem übernommenen Server prüfen, ob der STACKIT Server Agent aktiv ist.
+8. Keine VM oder Normalisierungsvolumes blind löschen: gelabelte Ressourcen können
    einen fortsetzbaren Zwischenstand enthalten.
 
 Der Installer gibt Fehler mit der betroffenen Phase zurück. Beim Zertifikatseinbau

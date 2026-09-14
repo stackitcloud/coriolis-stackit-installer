@@ -16,11 +16,13 @@ import (
 	stackitcfg "github.com/stackitcloud/stackit-sdk-go/core/config"
 	iaas "github.com/stackitcloud/stackit-sdk-go/services/iaas/v2api"
 	runcommand "github.com/stackitcloud/stackit-sdk-go/services/runcommand/v2api"
+	serviceenablement "github.com/stackitcloud/stackit-sdk-go/services/serviceenablement/v1api"
 )
 
 type Cloud struct {
 	api             *iaas.APIClient
 	run             *runcommand.APIClient
+	enablement      serviceenablement.DefaultAPI
 	http            *http.Client
 	project, region string
 	poll            time.Duration
@@ -43,7 +45,12 @@ func newCloud(c Config, refreshContexts ...context.Context) (*Cloud, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Cloud{api: api, run: run, http: &http.Client{Timeout: 0}, project: c.ProjectID, region: c.Region, poll: c.PollInterval, credentials: c.Credentials, refreshCtx: refreshCtx}, nil
+	enablementHTTP := &http.Client{Timeout: 2 * time.Minute}
+	enablement, err := serviceenablement.NewAPIClient(stackitcfg.WithRegion(c.Region), stackitcfg.WithServiceAccountKeyPath(c.Credentials), stackitcfg.WithBackgroundTokenRefresh(refreshCtx), stackitcfg.WithHTTPClient(enablementHTTP))
+	if err != nil {
+		return nil, err
+	}
+	return &Cloud{api: api, run: run, enablement: enablement.DefaultAPI, http: &http.Client{Timeout: 0}, project: c.ProjectID, region: c.Region, poll: c.PollInterval, credentials: c.Credentials, refreshCtx: refreshCtx}, nil
 }
 
 // runShellScript executes a script through the STACKIT Server Agent. This is

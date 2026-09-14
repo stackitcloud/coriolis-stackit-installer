@@ -10,6 +10,7 @@ require (
 	github.com/stackitcloud/stackit-sdk-go/services/dns v0.23.0
 	github.com/stackitcloud/stackit-sdk-go/services/iaas v1.14.1
 	github.com/stackitcloud/stackit-sdk-go/services/runcommand v1.10.1
+	github.com/stackitcloud/stackit-sdk-go/services/serviceenablement v1.7.2
 	golang.org/x/crypto v0.50.0
 	gopkg.in/yaml.v3 v3.0.1
 )
