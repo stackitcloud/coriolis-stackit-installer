@@ -17,6 +17,12 @@ func TestBuildAgentBootstrapScript(t *testing.T) {
 			t.Fatalf("bootstrap script is missing %q", expected)
 		}
 	}
+	if strings.Contains(script, `strip(" '\\"")`) {
+		t.Fatal("generated persistence probe contains invalid Python quoting")
+	}
+	if !strings.Contains(script, `strip().strip("'").strip('"')`) {
+		t.Fatal("generated persistence probe does not safely normalize YAML scalar quotes")
+	}
 	if len(script) > 10_000 {
 		t.Fatalf("bootstrap script exceeds Run Command limit: %d bytes", len(script))
 	}

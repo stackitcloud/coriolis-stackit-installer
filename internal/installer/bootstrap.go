@@ -49,7 +49,7 @@ if len(matches) != 1:
 try:
     value = json.loads(matches[0])
 except Exception:
-    value = matches[0].strip(" '\\"")
+    value = matches[0].strip().strip("'").strip('"')
 raise SystemExit(0 if value == os.environ["NEW_PASSWORD"] else 1)
 PY
   then
