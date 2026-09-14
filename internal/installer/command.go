@@ -1,4 +1,4 @@
-package main
+package installer
 
 import (
 	"context"
@@ -13,8 +13,6 @@ import (
 	serviceenablement "github.com/stackitcloud/stackit-sdk-go/services/serviceenablement/v1api"
 )
 
-var version = "dev"
-
 type result struct {
 	ProjectID, Region, ImageID, NetworkID, ServerID, AvailabilityZone, MachineType, OVAHash string `json:",omitempty"`
 	SecurityGroupID, PublicIP, LoginURL, LoginUser, PasswordHint                            string `json:",omitempty"`
@@ -22,14 +20,8 @@ type result struct {
 	GeneratedPassword                                                                       string `json:"generated_password,omitempty"`
 }
 
-func main() {
-	if err := run(os.Args[1:]); err != nil {
-		fmt.Fprintln(os.Stderr, "error:", err)
-		os.Exit(1)
-	}
-}
-
-func run(args []string) error {
+// Run executes the installer command with the supplied build version.
+func Run(args []string, version string) error {
 	fs := flag.NewFlagSet("coriolis-stackit", flag.ContinueOnError)
 	configPath := fs.String("config", "", "YAML configuration file")
 	project := fs.String("project-id", "", "STACKIT project ID")

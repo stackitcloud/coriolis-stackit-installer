@@ -10,10 +10,9 @@ credentials*.json
 .env.*
 
 # Project-specific installer configuration
-config.yaml
-config.local.yaml
-config.*.yaml
-!config.example.yaml
+/config.yaml
+/config.local.yaml
+/config.*.yaml
 
 # Appliance images and conversion artifacts
 *.ova

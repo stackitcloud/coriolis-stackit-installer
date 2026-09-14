@@ -119,6 +119,40 @@ flowchart LR
 | HTTPS | Direktes Appliance-Zertifikat oder optionaler ALB | `exposure.*` |
 | Laufzeit | Gesamt-Timeout, Polling und Upload-Wiederholungen | `timeout`, `poll_interval`, `upload_attempts` |
 
+## Typische Laufzeiten
+
+Die folgenden Werte sind Richtwerte für das derzeitige OVA mit ungefähr 7 GiB
+komprimierter VMDK, Normalisierungsvolumes der Klasse `storage_premium_perf12` und
+einer stabilen Internetverbindung. STACKIT-Auslastung, lokale Uploadbandbreite,
+OVA-Größe und Storageklasse können die Zeiten deutlich verändern.
+
+| Schritt | Typische Dauer | Wichtigster Einfluss |
+|---|---:|---|
+| OVA lesen, OVF auswerten und SHA-256 bilden | 30 Sekunden–3 Minuten | lokale Diskgeschwindigkeit |
+| Credentials, Platzierung und Run Command Service prüfen/aktivieren | 30 Sekunden–3 Minuten | erstmalige Serviceaktivierung |
+| DNS-Zone, Netzwerk und Security Group sicherstellen | 1–4 Minuten | Anzahl neu anzulegender Ressourcen |
+| Normalisierungsvolumes und Hilfs-VM starten | 3–10 Minuten | VM-/Volume-Provisionierung und Agent-Start |
+| VMDK aus dem OVA zur Hilfs-VM übertragen | 8–30 Minuten | lokale Uploadbandbreite; bei 7 GiB etwa 10 Minuten mit 100 Mbit/s netto |
+| VMDK nach RAW konvertieren | 3–15 Minuten | OVA-Format und Volume-Performanceklasse |
+| Appliance offline normalisieren | 1–5 Minuten | Dateisystemprüfung und Agent-Installation |
+| RAW nach QCOW2 konvertieren und hochladen | 8–30 Minuten | Datenbelegung, CPU und Volume-Performanceklasse |
+| STACKIT-Image bis `AVAILABLE` verarbeiten | 3–15 Minuten | Image-Service-Auslastung |
+| Appliance-VM booten und Server Agent abwarten | 3–10 Minuten | Boot und erstmalige Agent-Registrierung |
+| Kennwort, Public IP, DNS und direktes Zertifikat konfigurieren | 2–10 Minuten | DNS-Propagation und ACME |
+| Optionalen ALB bereitstellen | zusätzlich 5–15 Minuten | ALB- und Listener-Provisionierung |
+
+Damit ergeben sich folgende Größenordnungen:
+
+- erster vollständiger Import mit direktem HTTPS: meistens **40–100 Minuten**;
+- Deployment mit bereits normalisiertem oder geteiltem Image: meistens **8–25 Minuten**;
+- idempotenter Folgelauf ohne wesentliche Änderungen: meistens **2–10 Minuten**;
+- ALB-Modus: zusätzlich ungefähr **5–15 Minuten**.
+
+Das konfigurierte `timeout` ist eine technische Obergrenze und keine Schätzung.
+Bei langsamem Upload oder erstmaligem Import sollte es vorsorglich auf `120m` bis
+`150m` erhöht werden. `storage_premium_perf1` kann insbesondere die beiden
+Konvertierungsschritte stark verlängern; die Schätzungen basieren auf `perf12`.
+
 ## Technische Voraussetzungen
 
 ### Bedienrechner
@@ -196,11 +230,11 @@ Go-Tests aus.
 
 ### 2. Konfiguration anlegen
 
-[`config.example.yaml`](config.example.yaml) enthält alle Einstellungen. Für ein
+[`examples/config.yaml`](examples/config.yaml) enthält alle Einstellungen. Für ein
 neues Projekt empfiehlt sich eine eigene Datei:
 
 ```bash
-cp config.example.yaml config.yaml
+cp examples/config.yaml config.yaml
 ```
 
 Ein minimales, für den direkten HTTPS-Zugriff geeignetes Beispiel:
@@ -832,10 +866,34 @@ nicht in das Konsolenlog übernommen.
 
 ## Entwicklung
 
+### Projektstruktur
+
+```text
+.
+├── cmd/
+│   └── coriolis-stackit/
+│       └── main.go            # schlanker Programmeinstieg
+├── internal/
+│   └── installer/             # Deploymentlogik und Unit-Tests
+├── examples/
+│   └── config.yaml            # vollständige, secret-freie Beispielkonfiguration
+├── Makefile
+├── README.md
+├── go.mod
+└── go.sum
+```
+
+`internal/installer` ist absichtlich ein gemeinsames internes Paket: Die Phasen
+teilen Konfiguration, Cloud-Client und Zustandsmodell und bilden keine öffentliche
+Go-Bibliothek. Projektspezifische YAML-Dateien, Credentials, OVAs, Wartungsdaten und
+gebaute Binaries bleiben durch `.gitignore` ausschließlich lokal.
+
+### Bauen und testen
+
 ```bash
 go test ./...
 go vet ./...
-go build -trimpath -o bin/coriolis-stackit .
+go build -trimpath -o bin/coriolis-stackit ./cmd/coriolis-stackit
 ```
 
 Oder über das Makefile:
