@@ -40,6 +40,7 @@ func TestCertificateScriptsDoNotEmbedFQDNLiterally(t *testing.T) {
 		"probe":        certificateProbeScript(fqdn, 30),
 		"staged-probe": certificateStagedProbeScript(fqdn, 30),
 		"csr":          certificateCSRScript(fqdn),
+		"chain":        certificateChainValidationScript(fqdn),
 		"apply":        certificateApplyScript(fqdn),
 	} {
 		if strings.Contains(script, fqdn) {
@@ -48,6 +49,29 @@ func TestCertificateScriptsDoNotEmbedFQDNLiterally(t *testing.T) {
 		if len(script) > 10_000 {
 			t.Fatalf("%s script exceeds Run Command limit: %d bytes", name, len(script))
 		}
+	}
+}
+
+func TestCertificateApplyScriptHasRunCommandSizeMargin(t *testing.T) {
+	script := certificateApplyScript("coriolis.example.test")
+	if len(script) > 8_000 {
+		t.Fatalf("certificate apply script has insufficient Run Command size margin: %d bytes", len(script))
+	}
+	if !strings.Contains(script, `for f in "$work/intermediates.pem" "$work/trust-anchor.pem"`) {
+		t.Fatal("certificate apply script does not require prepared chain files")
+	}
+}
+
+func TestCertificateChainPreparationIsPersistent(t *testing.T) {
+	script := certificateChainValidationScript("coriolis.example.test")
+	if !strings.Contains(script, `work=$stage/chain-work`) {
+		t.Fatal("certificate chain preparation must persist output for the apply command")
+	}
+	if strings.Contains(script, "mktemp") {
+		t.Fatal("certificate chain preparation must not delete output before the apply command")
+	}
+	if !strings.Contains(script, `install -m 0644 "$trust_anchor" "$work/trust-anchor.pem"`) {
+		t.Fatal("certificate chain preparation must persist the trust anchor for the apply command")
 	}
 }
 
@@ -67,6 +91,19 @@ func TestCertificateStageScriptFitsRunCommand(t *testing.T) {
 	script := certificateStageFileScript("server.pem", make([]byte, 4000))
 	if len(script) > 10_000 {
 		t.Fatalf("stage script exceeds Run Command limit: %d bytes", len(script))
+	}
+}
+
+func TestCertificateStageFilesHaveDeterministicOrder(t *testing.T) {
+	files := certificateStageFiles([]byte("leaf"), []byte("issuer"))
+	if len(files) != 2 {
+		t.Fatalf("unexpected number of staged files: %d", len(files))
+	}
+	if files[0].name != "server.pem" || string(files[0].contents) != "leaf" {
+		t.Fatalf("unexpected first staged file: %#v", files[0])
+	}
+	if files[1].name != "issuer.pem" || string(files[1].contents) != "issuer" {
+		t.Fatalf("unexpected second staged file: %#v", files[1])
 	}
 }
 

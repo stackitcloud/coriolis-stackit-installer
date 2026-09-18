@@ -7,7 +7,40 @@ import (
 	"encoding/pem"
 	"fmt"
 	"strings"
+	"time"
 )
+
+type certificateStageFile struct {
+	name     string
+	contents []byte
+}
+
+func certificateStageFiles(certificate, issuerCertificate []byte) []certificateStageFile {
+	return []certificateStageFile{
+		{name: "server.pem", contents: certificate},
+		{name: "issuer.pem", contents: issuerCertificate},
+	}
+}
+
+func (c *Cloud) stageCertificateFile(ctx context.Context, serverID string, file certificateStageFile) error {
+	var lastErr error
+	for attempt := 1; attempt <= 3; attempt++ {
+		_, lastErr = c.runShellScriptWithOutput(ctx, c.project, serverID, certificateStageFileScript(file.name, file.contents), false)
+		if lastErr == nil {
+			return nil
+		}
+		if !retryableCommandError(lastErr) || attempt == 3 {
+			return lastErr
+		}
+		writeInfo("retrying idempotent certificate staging for %s after transient run-command failure (attempt %d/3)", file.name, attempt+1)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(c.poll):
+		}
+	}
+	return lastErr
+}
 
 func certificateProbeScript(fqdn string, renewBeforeDays int) string {
 	fqdn64 := base64.StdEncoding.EncodeToString([]byte(fqdn))
@@ -105,15 +138,17 @@ echo CERTIFICATE_MATERIAL_STAGED
 }
 
 // certificateChainValidationScript validates staged public certificate
-// material in a temporary directory. It never writes active appliance files.
+// material and prepares the exact chain files consumed by the separate apply
+// command. It never writes active appliance files.
 func certificateChainValidationScript(fqdn string) string {
 	fqdn64 := base64.StdEncoding.EncodeToString([]byte(fqdn))
 	return fmt.Sprintf(`#!/bin/bash
 set -euo pipefail
 fqdn=$(printf '%%s' %q | base64 -d)
 stage=/var/lib/coriolis-stackit/tls-staging
-work=$(mktemp -d /tmp/coriolis-certificate-validation.XXXXXX)
-trap 'rm -rf "$work"' EXIT
+work=$stage/chain-work
+rm -rf "$work"
+install -d -m 0700 "$work"
 for f in "$stage/server.pem" "$stage/issuer.pem"; do test -s "$f"; done
 openssl x509 -in "$stage/server.pem" -noout -checkhost "$fqdn" >/dev/null
 awk -v dir="$work" '
@@ -154,7 +189,9 @@ else
 fi
 if [ -z "$trust_anchor" ]; then echo TRUST_ANCHOR_NOT_FOUND; exit 1; fi
 cat "${issuer_files[@]:0:$intermediate_count}" > "$work/intermediates.pem"
-openssl verify -CAfile "$trust_anchor" -untrusted "$work/intermediates.pem" "$stage/server.pem" >/dev/null
+install -m 0644 "$trust_anchor" "$work/trust-anchor.pem"
+openssl x509 -in "$work/trust-anchor.pem" -noout >/dev/null
+openssl verify -CAfile "$work/trust-anchor.pem" -untrusted "$work/intermediates.pem" "$stage/server.pem" >/dev/null
 echo "intermediates=$(grep -c '^-----BEGIN CERTIFICATE-----$' "$work/intermediates.pem")"
 echo "trust_anchors=1"
 openssl x509 -in "$trust_anchor" -noout -subject -issuer
@@ -190,6 +227,7 @@ config=$base/config.yml
 kolla=/etc/kolla/globals.yml
 work=$stage/chain-work
 reconfigure_log=/var/log/coriolis-stackit-certificate.log
+failure_log=/var/lib/coriolis-stackit/certificate-reconfigure-failure.log
 phase=certificate_preparation
 
 for f in "$stage/server.pem" "$stage/issuer.pem" "$stage/server.key"; do test -s "$f"; done
@@ -199,46 +237,7 @@ openssl pkey -in "$stage/server.key" -check -noout >/dev/null
 cert_pub=$(openssl x509 -in "$stage/server.pem" -pubkey -noout | openssl pkey -pubin -outform DER 2>/dev/null | sha256sum | awk '{print $1}')
 key_pub=$(openssl pkey -in "$stage/server.key" -pubout -outform DER 2>/dev/null | sha256sum | awk '{print $1}')
 test "$cert_pub" = "$key_pub"
-
-rm -rf "$work"
-install -d -m 0700 "$work"
-awk -v dir="$work" '
-  /-----BEGIN CERTIFICATE-----/ {n++; file=sprintf("%%s/issuer-%%03d.pem", dir, n); inside=1}
-  inside {print > file}
-  /-----END CERTIFICATE-----/ {close(file); inside=0}
-' "$stage/issuer.pem"
-mapfile -t issuer_files < <(find "$work" -name 'issuer-*.pem' -type f | sort)
-[ "${#issuer_files[@]}" -gt 0 ]
-for f in "${issuer_files[@]}"; do openssl x509 -in "$f" -noout >/dev/null; done
-openssl verify -partial_chain -CAfile "${issuer_files[0]}" "$stage/server.pem" >/dev/null
-for ((i=0; i+1<${#issuer_files[@]}; i++)); do
-  openssl verify -partial_chain -CAfile "${issuer_files[$((i+1))]}" "${issuer_files[$i]}" >/dev/null
-done
-
-last=${issuer_files[$((${#issuer_files[@]}-1))]}
-last_subject=$(openssl x509 -in "$last" -noout -subject -nameopt RFC2253 | sed 's/^subject=//')
-last_issuer=$(openssl x509 -in "$last" -noout -issuer -nameopt RFC2253 | sed 's/^issuer=//')
-trust_anchor=""
-intermediate_count=${#issuer_files[@]}
-if [ "$last_subject" = "$last_issuer" ] && openssl verify -CAfile "$last" "$last" >/dev/null 2>&1; then
-  trust_anchor=$last
-  intermediate_count=$((intermediate_count-1))
-else
-  while IFS= read -r candidate; do
-    [ -s "$candidate" ] || continue
-    candidate_subject=$(openssl x509 -in "$candidate" -noout -subject -nameopt RFC2253 2>/dev/null | sed 's/^subject=//' || true)
-    candidate_issuer=$(openssl x509 -in "$candidate" -noout -issuer -nameopt RFC2253 2>/dev/null | sed 's/^issuer=//' || true)
-    [ "$candidate_subject" = "$last_issuer" ] || continue
-    [ "$candidate_subject" = "$candidate_issuer" ] || continue
-    if openssl verify -CAfile "$candidate" "$candidate" >/dev/null 2>&1 && openssl verify -CAfile "$candidate" "$last" >/dev/null 2>&1; then
-      trust_anchor=$candidate
-      break
-    fi
-  done < <(find -L /etc/ssl/certs -maxdepth 1 -type f \( -name '*.pem' -o -name '*.crt' \) | sort -u)
-fi
-[ -n "$trust_anchor" ]
-cat "${issuer_files[@]:0:$intermediate_count}" > "$work/intermediates.pem"
-install -m 0644 "$trust_anchor" "$work/trust-anchor.pem"
+for f in "$work/intermediates.pem" "$work/trust-anchor.pem"; do test -s "$f"; done
 openssl x509 -in "$work/trust-anchor.pem" -noout >/dev/null
 openssl verify -CAfile "$work/trust-anchor.pem" -untrusted "$work/intermediates.pem" "$stage/server.pem" >/dev/null
 
@@ -295,6 +294,9 @@ rollback() {
   update-ca-certificates >/dev/null 2>&1 || true
   ip=$(ip -4 route get 1.1.1.1 | awk '{for(i=1;i<=NF;i++) if($i=="src") {print $(i+1); exit}}')
   python3 "$base/expose_coriolis.py" --use-address "$ip" >>"$reconfigure_log" 2>&1 || true
+  if [ -s "$reconfigure_log" ]; then
+    install -m 0600 "$reconfigure_log" "$failure_log"
+  fi
   rm -f "$reconfigure_log"
   echo "CERTIFICATE_APPLY_FAILED phase=$phase task=$failed_task categories=${categories#,} rollback=completed"
 }
@@ -346,7 +348,7 @@ done
 trap - ERR
 fingerprint=$(openssl x509 -in "$api_cert" -noout -fingerprint -sha256 | cut -d= -f2)
 rm -rf "$stage" "$backup"
-rm -f "$reconfigure_log"
+rm -f "$reconfigure_log" "$failure_log"
 printf 'CERTIFICATE_INSTALLED fingerprint=%%s\n' "$fingerprint"
 `, fqdn64)
 }
@@ -449,15 +451,27 @@ func (c *Cloud) ensureDirectCertificate(ctx context.Context, cfg CertificateConf
 			return err
 		}
 		if err := progressAction(ctx, "Staging trusted certificate on appliance", func() error {
-			for name, contents := range map[string][]byte{"server.pem": certificate, "issuer.pem": issuerCertificate} {
-				if _, stageErr := c.runShellScriptWithOutput(ctx, c.project, serverID, certificateStageFileScript(name, contents), false); stageErr != nil {
-					return fmt.Errorf("stage %s on appliance: %w", name, stageErr)
+			for _, file := range certificateStageFiles(certificate, issuerCertificate) {
+				if stageErr := c.stageCertificateFile(ctx, serverID, file); stageErr != nil {
+					return fmt.Errorf("stage %s on appliance: %w", file.name, stageErr)
 				}
 			}
 			return nil
 		}); err != nil {
 			return err
 		}
+	}
+	if err := progressAction(ctx, "Preparing and validating trusted certificate chain", func() error {
+		output, prepareErr := c.runShellScriptWithOutput(ctx, c.project, serverID, certificateChainValidationScript(fqdn), false)
+		if prepareErr != nil {
+			return prepareErr
+		}
+		if !strings.Contains(output, "CERTIFICATE_CHAIN_PREPARATION_OK") {
+			return fmt.Errorf("certificate chain preparation completed without a verification marker")
+		}
+		return nil
+	}); err != nil {
+		return fmt.Errorf("prepare appliance certificate chain: %w", err)
 	}
 	return progressAction(ctx, "Applying trusted certificate and reconfiguring Coriolis services", func() error {
 		applyOutput, applyErr := c.runShellScriptWithOutput(ctx, c.project, serverID, certificateApplyScript(fqdn), false)
