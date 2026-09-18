@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/stackitcloud/coriolis-stackit-installer/internal/installer"
+	"github.com/stackitcloud/coriolis-stackit-installer/installer"
 )
 
 var version = "dev"

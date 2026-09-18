@@ -22,7 +22,13 @@ type result struct {
 }
 
 // Run executes the installer command with the supplied build version.
-func Run(args []string, version string) (runErr error) {
+func Run(args []string, version string) error {
+	return RunWithExtensions(args, version)
+}
+
+// RunWithExtensions executes the installer and invokes optional deployment
+// extensions at well-defined lifecycle points.
+func RunWithExtensions(args []string, version string, extensions ...Extension) (runErr error) {
 	fs := flag.NewFlagSet("coriolis-stackit", flag.ContinueOnError)
 	configPath := fs.String("config", "", "YAML configuration file")
 	project := fs.String("project-id", "", "STACKIT project ID")
@@ -66,6 +72,11 @@ func Run(args []string, version string) (runErr error) {
 	c, err := loadConfig(*configPath)
 	if err != nil {
 		return err
+	}
+	for _, extension := range extensions {
+		if err := extension.Configure(*configPath); err != nil {
+			return fmt.Errorf("configure extension %q: %w", extension.Name(), err)
+		}
 	}
 	if *project != "" {
 		c.ProjectID = *project
@@ -347,6 +358,19 @@ func Run(args []string, version string) (runErr error) {
 		return bootstrapErr
 	}); err != nil {
 		return fmt.Errorf("bootstrap appliance: %w", err)
+	}
+	for _, extension := range extensions {
+		name := extension.Name()
+		if err := deploymentPhase(ctx, c.Timeout, "Applying extension "+name, func(phaseCtx context.Context) error {
+			return extension.AfterBootstrap(phaseCtx, cloud, DeploymentTarget{
+				ProjectID: c.ProjectID,
+				Region:    c.Region,
+				ServerID:  resolvedServerID,
+				FQDN:      fqdn,
+			})
+		}); err != nil {
+			return fmt.Errorf("apply extension %q: %w", name, err)
+		}
 	}
 	res := result{ProjectID: c.ProjectID, Region: c.Region, ImageID: resolvedImageID, NetworkID: netID, SecurityGroupID: sgID, ServerID: resolvedServerID, AvailabilityZone: zoneResolved, MachineType: machineResolved, OVAHash: info.SHA256, LoginUser: "admin", PasswordHint: "configured automatically through the STACKIT Server Agent"}
 	if passwordWasGenerated && appliancePassword != "" && c.Bootstrap.PrintGeneratedPassword {

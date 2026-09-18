@@ -28,6 +28,7 @@ bin/
 
 # Local maintenance and diagnostic material
 .maintenance/
+.private/
 image_list.output
 Coriolis.code-workspace
 
