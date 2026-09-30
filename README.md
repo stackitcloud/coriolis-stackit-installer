@@ -212,6 +212,11 @@ Start with [Technical prerequisites](docs/en/prerequisites.md), then follow the
 copy [examples/config.yaml](examples/config.yaml) and use the
 [configuration reference](docs/en/configuration.md).
 
+## Contributing
+
+Contributions to the installer are welcome. See the
+[contribution guidelines](CONTRIBUTING.md) and [Code of Conduct](CODE_OF_CONDUCT.md).
+
 ## License
 
 The Coriolis STACKIT Installer, including the source code, documentation, and

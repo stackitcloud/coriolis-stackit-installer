@@ -216,6 +216,12 @@ mit dem [Schnellstart](docs/de/getting-started.md). Für eine vollständige
 Konfiguration kann [examples/config.yaml](examples/config.yaml) kopiert und
 zusammen mit der [Konfigurationsreferenz](docs/de/configuration.md) verwendet werden.
 
+## Mitwirken
+
+Beiträge zum Installer sind willkommen. Bitte beachte die
+[Beitragsrichtlinien](CONTRIBUTING.md) und den [Verhaltenskodex](CODE_OF_CONDUCT.md)
+(jeweils auf Englisch).
+
 ## Lizenz
 
 Der Coriolis STACKIT Installer einschließlich Quellcode, Dokumentation und
