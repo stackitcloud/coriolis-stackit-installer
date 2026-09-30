@@ -215,3 +215,12 @@ Beginne mit den [technischen Voraussetzungen](docs/de/prerequisites.md) und dana
 mit dem [Schnellstart](docs/de/getting-started.md). Für eine vollständige
 Konfiguration kann [examples/config.yaml](examples/config.yaml) kopiert und
 zusammen mit der [Konfigurationsreferenz](docs/de/configuration.md) verwendet werden.
+
+## Lizenz
+
+Der Coriolis STACKIT Installer einschließlich Quellcode, Dokumentation und
+Beispielen in diesem Repository steht unter der
+[Apache License, Version 2.0](LICENSE) (`Apache-2.0`).
+
+Diese Lizenz gilt für den Installer. Für die Cloudbase-Coriolis-Appliance und
+Drittkomponenten gelten weiterhin deren jeweilige Lizenzen und Bedingungen.

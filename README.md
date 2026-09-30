@@ -211,3 +211,12 @@ Start with [Technical prerequisites](docs/en/prerequisites.md), then follow the
 [Getting started guide](docs/en/getting-started.md). For a complete configuration,
 copy [examples/config.yaml](examples/config.yaml) and use the
 [configuration reference](docs/en/configuration.md).
+
+## License
+
+The Coriolis STACKIT Installer, including the source code, documentation, and
+examples in this repository, is licensed under the
+[Apache License, Version 2.0](LICENSE) (`Apache-2.0`).
+
+This license applies to the installer. The Cloudbase Coriolis appliance and
+third-party components remain subject to their respective licenses and terms.
