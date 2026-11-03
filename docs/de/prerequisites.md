@@ -7,17 +7,17 @@
 Für die Ausführung werden benötigt:
 
 - das für das Betriebssystem und die CPU-Architektur gebaute Installer-Binary;
-- lesender Zugriff auf das OVA;
+- für Deployments lesender Zugriff auf die OVA; Wartungsbefehle benötigen sie nicht;
 - ausgehendes HTTPS zu den STACKIT APIs und – bei aktiviertem Zertifikat – zum
   ACME-Dienst;
 - beim erstmaligen Normalisieren eines OVA ausgehendes TCP/22 zur temporären
   Public IP der Hilfs-VM;
-- ausreichend freier lokaler Speicher zum Lesen des OVA. Die VMDK wird nicht lokal
-  extrahiert und es wird lokal kein QCOW2 erzeugt.
+- ausreichend freier lokaler Speicher für die OVA und geschützte Ergebnisdateien;
+- für die Versionssuche ausgehendes HTTPS zu den offiziellen Coriolis Release Notes.
 
-Zum Bauen aus dem Quellcode wird Go 1.25 oder neuer benötigt. `qemu-img`, Terraform,
-libguestfs, `virt-customize` und die STACKIT CLI sind auf dem Bedienrechner nicht
-erforderlich.
+Nur beim Bauen aus dem Quellcode wird zusätzlich die in
+[go.mod](../../go.mod) angegebene Go-Version benötigt. Terraform und die STACKIT
+CLI sind auf dem Bedienrechner nicht erforderlich.
 
 ### STACKIT-Projekt und Berechtigungen
 
@@ -35,6 +35,10 @@ die der gewählte Ablauf nutzt:
 - STACKIT DNS, wenn `dns.enabled: true` gesetzt ist;
 - Application Load Balancer und Certificate Service nur im ALB-Modus.
 
+Für Updates werden zusätzlich Rechte für Volume-Snapshots und Server-Stopp/-Start
+benötigt. Wartungsbefehle setzen einen bereits aktivierten Run Command Service
+und einen funktionierenden Agenten voraus; sie aktivieren den Dienst nicht selbst.
+
 Bei einem zentralen Image-Projekt werden die IaaS- und Image-Freigaberechte sowohl
 im Image-Eigentümerprojekt als auch im Zielprojekt benötigt. Beide Projekte müssen
 zur selben Organisation gehören und das Image in derselben Region verwenden.
@@ -51,10 +55,14 @@ chmod 600 credentials.json
 Beim ersten Import werden vorübergehend eine Hilfs-VM, zwei Datenvolumes, eine
 Public IP, eine Security Group und ein Keypair benötigt. Zusätzlich muss Quota für
 das normalisierte Image, die Appliance-VM und deren Boot-Volume vorhanden sein.
+Für Updates muss Snapshot-Quota für alle angehängten Appliance-Volumes verfügbar
+sein. Aufbewahrte Snapshots verursachen zusätzliche Speicherkosten.
 
 Die Hilfs-VM benötigt ausgehenden Zugriff auf Ubuntu-Paketquellen, den STACKIT-
 Metadatendienst und die Image-Upload-URL. Das Zielnetz muss für den Server Agent und
 die späteren Coriolis-Verbindungen ausgehenden Verkehr erlauben.
+Für Service-Updates muss die Appliance außerdem die benötigten Herstellerdienste
+und Container-Images erreichen können.
 
 ### OVA-Anforderungen
 

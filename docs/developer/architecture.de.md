@@ -1,6 +1,9 @@
 # Architektur und technischer Ablauf
 
-[← Übersicht](../../README.de.md) | [English](../en/architecture.md)
+[← Entwicklerdokumentation](README.md) | [English](architecture.md)
+
+Dieses Dokument richtet sich an Entwickler und Maintainer. Die Anleitung zur
+Nutzung steht unter [Betrieb und Wartung](../de/operations.md).
 
 ## Detaillierter technischer Ablauf
 
@@ -49,7 +52,8 @@ Auf der Hilfs-VM geschieht anschließend:
 1. Installation von `qemu-utils`;
 2. VMDK → RAW direkt auf das performante Quellvolume;
 3. schreibbares Einhängen der Appliance-Rootpartition;
-4. Offline-Installation und Aktivierung des STACKIT Server Agent;
+4. Extraktion des STACKIT Server Agent und Aktivierung seiner Unit ohne
+   Paketkonfiguration im eingehängten Appliance-Dateisystem;
 5. Entfernen ausschließlich maschinenspezifischer Agent- und Cloud-init-Zustände;
 6. RAW → QCOW2 auf das Scratchvolume;
 7. Prüfung des QCOW2 und Upload über die STACKIT-Image-Upload-URL;
@@ -143,3 +147,38 @@ Appliance installiert, damit Weboberfläche und Coriolis-Dienste möglichst nah 
 Herstellerprodukt bleiben. Der ALB betrifft nur den konfigurierten Layer-7-Webpfad;
 Migrations- und Worker-Verbindungen werden nicht automatisch durch ihn geführt.
 
+### 9. Wartung und In-place-Updates
+
+Die Wartungsbefehle werden vor dem Deployment-Ablauf abgefangen. Sie benötigen
+keine OVA und dürfen weder Bootstrap noch Zertifikatsverwaltung auslösen.
+
+- Veröffentlichte Zielversionen stammen aus den offiziellen Release Notes.
+  Komponenten-Manifeste werden im Gast mit Dockers vorhandener Authentifizierung
+  geprüft, gemeinsam je Zielversion.
+- Run Command liefert nicht zwingend dieselbe Umgebung wie die Herstellerkonsole.
+  Die Wartung setzt `HOME=/root`, damit auch Docker-Credential-Helper ihren
+  vorgesehenen Benutzerkontext erhalten. Zugangsdaten dürfen nicht zum lokalen
+  CLI exportiert werden.
+- Der gemeinsame Paketmanager-Preflight prüft Audit, ausstehende Journale und
+  Sperren. Er darf keine Paket-Reparatur auslösen und muss auch einen offline
+  extrahierten, nicht bei dpkg registrierten Agenten zulassen.
+- Paketkonfigurationen, deren Postinst den Agent-Service neu startet, dürfen nicht
+  als Kindprozess dieses Services repariert werden. Solche administrativen
+  Reparaturen benötigen einen unabhängigen Prozess und eine eigene Verifikation.
+- Der Plan bindet Ziel, Volume-Satz und Appliance-Baseline an eine explizite
+  Freigabe. Das lokale Wartungsjournal wird vor jedem Cloud-Schritt dauerhaft
+  gespeichert; vorhandene Versuche dürfen nicht überschrieben werden.
+- Vor Snapshots werden lokale Annahmewege geschlossen und Jobs sowie Daten aller
+  Mandanten erneut geprüft. Erst danach werden Container und VM gestoppt.
+  Sämtliche angehängten Volumes müssen bei gestoppter VM gesichert und alle
+  Snapshots verfügbar sein, bevor die VM neu startet.
+- Der Updater läuft als unabhängige systemd-Unit. Die Abschlussprüfung verlangt
+  Zielrelease, Komponenten-Images, Gesundheit sowie unveränderte Mandantendaten,
+  geschützte Einstellungen und TLS-Fingerprints. Erst dann darf die Sperre fallen.
+- Fehler dürfen weder einen automatischen Datenbank-Rollback noch einen blinden
+  zweiten Start auslösen. Snapshots und Diagnosezustand bleiben erhalten.
+
+Die Implementierung liegt in [maintenance.go](../../installer/maintenance.go),
+[maintenance_cloud.go](../../installer/maintenance_cloud.go),
+[maintenance_update.go](../../installer/maintenance_update.go) und den zugehörigen
+Collector- und Testdateien.

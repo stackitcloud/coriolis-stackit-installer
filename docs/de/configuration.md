@@ -10,7 +10,7 @@
 |---|---|---|
 | `project_id` | STACKIT-Zielprojekt | erforderlich |
 | `credentials` | Pfad zum Service-Account-Key | erforderlich |
-| `ova` | Pfad zur Coriolis-OVA | erforderlich |
+| `ova` | Pfad zur Coriolis-OVA | nur für Deployment erforderlich |
 | `region` | STACKIT-Region | `eu01` |
 | `timeout` | Maximale Laufzeit jeder einzelnen Hauptphase | `90m` |
 | `poll_interval` | Pollingintervall für asynchrone Ressourcen | `15s` |
@@ -106,7 +106,7 @@ Zugriff benötigt wird.
 | `public_ip` | Public IP im Direct-Modus sicherstellen | `true` |
 | `public_ip_id` | Bestimmte reservierte Public IP per ID verwenden | leer |
 | `public_ip_address` | Bestimmte reservierte Public IP per Adresse verwenden | leer |
-| `dns.enabled` | DNS verwalten | `false` im Code, im Beispiel aktiviert |
+| `dns.enabled` | DNS verwalten | `false`, im Beispiel aktiviert |
 | `dns.create_zone` | Fehlende Zone anlegen | `false` |
 | `dns.zone_id` | Vorhandene Zone per ID | leer |
 | `dns.zone_name` | Zonenname oder DNS-Name | erforderlich, wenn keine ID gesetzt ist |
@@ -135,7 +135,7 @@ Für erste ACME-Tests sollte `certificate.staging: true` verwendet werden. Erst 
 einem erfolgreichen Ablauf sollte auf die produktive CA umgestellt werden, um
 Rate-Limits zu vermeiden.
 
-## CLI-Überschreibungen
+## Deployment-Parameter
 
 CLI-Parameter überschreiben die entsprechenden YAML-Werte:
 
@@ -185,3 +185,24 @@ Beispiel ohne YAML für die drei Pflichtwerte:
 Für alle weiteren Werte gelten die Defaults. Für reproduzierbare Installationen wird
 eine versionierte YAML-Datei ohne Secrets empfohlen.
 
+## Wartungsbefehle und Parameter
+
+`status`, `versions`, `update` und `update-status` verwenden Projekt, Region und
+Zugangsdaten derselben Konfiguration, benötigen aber keine OVA. Sie führen weder
+Bootstrap noch Zertifikatsverwaltung aus.
+
+| Parameter | Verfügbar bei | Bedeutung |
+|---|---|---|
+| `--config` | allen Wartungsbefehlen | YAML-Konfiguration laden |
+| `--project-id`, `--credentials`, `--region` | allen Wartungsbefehlen | Entsprechenden Konfigurationswert überschreiben |
+| `--server-id` | allen Wartungsbefehlen | Bestehende Appliance ausdrücklich auswählen |
+| `--target-version` | `update` | Neuere numerische Release im selben YYMM-Stream |
+| `--latest-compatible` | `update` | Neuestes geeignetes Ziel im selben Stream auswählen; alternativ zu `--target-version` |
+| `--apply` | `update` | Geprüften Plan ausführen statt nur planen |
+| `--approve-plan` | `update --apply` | Den `approval`-Wert des geprüften Plans bestätigen |
+| `--confirm-server-id` | `update --apply` | Zielserver, Ausfallzeit und exklusiven Wartungszugriff bestätigen |
+| `--state-file` | `update --apply`, `update-status` | Neue Statusdatei für die Ausführung beziehungsweise dieselbe Datei zur Nachprüfung |
+
+Die Deployment-Optionen `--dry-run` und `--check-cloud` gelten nicht für diese
+Unterbefehle. `update` plant ohne `--apply` immer nur.
+Die vollständige Schrittfolge steht in der [Wartungsanleitung](operations.md#appliance-wartung).

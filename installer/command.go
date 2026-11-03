@@ -29,7 +29,15 @@ func Run(args []string, version string) error {
 // RunWithExtensions executes the installer and invokes optional deployment
 // extensions at well-defined lifecycle points.
 func RunWithExtensions(args []string, version string, extensions ...Extension) (runErr error) {
+	if len(args) > 0 && (args[0] == "status" || args[0] == "versions" || args[0] == "update" || args[0] == "update-status") {
+		return runMaintenance(args[0], args[1:])
+	}
 	fs := flag.NewFlagSet("coriolis-stackit", flag.ContinueOnError)
+	fs.Usage = func() {
+		fmt.Fprintln(fs.Output(), "Usage: coriolis-stackit [deployment flags]")
+		fmt.Fprintln(fs.Output(), "Maintenance: coriolis-stackit {status|versions|update|update-status} --help")
+		fs.PrintDefaults()
+	}
 	configPath := fs.String("config", "", "YAML configuration file")
 	project := fs.String("project-id", "", "STACKIT project ID")
 	credentials := fs.String("credentials", "", "service account key JSON")

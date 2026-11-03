@@ -7,15 +7,16 @@
 The operator workstation needs:
 
 - an installer binary built for its operating system and CPU architecture;
-- read access to the OVA;
+- for deployment, read access to the OVA; maintenance commands do not need it;
 - outbound HTTPS to STACKIT APIs and, when certificates are enabled, the ACME CA;
 - outbound TCP/22 to the temporary helper VM's public IP while normalizing a new
   OVA;
-- enough local storage to read the OVA. The VMDK is not extracted and no QCOW2 is
-  created locally.
+- enough local storage for the OVA and protected result files;
+- for version discovery, outbound HTTPS to the official Coriolis release notes.
 
-Building from source requires Go 1.25 or newer. `qemu-img`, Terraform, libguestfs,
-`virt-customize`, and the STACKIT CLI are not required on the operator workstation.
+Only building from source additionally requires the Go version specified in
+[go.mod](../../go.mod). Terraform and the STACKIT CLI are not required on the
+operator workstation.
 
 ### STACKIT project and permissions
 
@@ -33,6 +34,10 @@ by the selected workflow:
 - STACKIT DNS when `dns.enabled: true`;
 - Application Load Balancer and Certificate Service only in ALB mode.
 
+Updates also require volume snapshot and server stop/start permissions.
+Maintenance commands require Run Command to be enabled already and the agent
+to be functional; they do not enable the service themselves.
+
 With a central image project, IaaS and image-sharing permissions are required in
 both the image-owner project and the target project. Both projects must belong to
 the same organization and use the same region.
@@ -48,10 +53,14 @@ chmod 600 credentials.json
 The first import temporarily needs one helper VM, two data volumes, one public IP,
 one security group, and one key pair. Additional quota is required for the
 normalized image, appliance VM, and its boot volume.
+Updates require snapshot quota for every attached appliance volume. Retained
+snapshots incur additional storage costs.
 
 The helper VM needs outbound access to Ubuntu package repositories, the STACKIT
 metadata service, and the image upload URL. The target network must allow outbound
 traffic for the Server Agent and later Coriolis connections.
+For service updates, the appliance must also reach the required vendor services
+and container images.
 
 ### OVA requirements
 

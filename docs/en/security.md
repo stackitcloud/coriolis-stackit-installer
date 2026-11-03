@@ -22,39 +22,51 @@ can require additional narrowly scoped ingress rules. Refer to the
 ### Temporary helper SSH access
 
 Only while importing a new OVA, the installer creates a separate security group
-for TCP/22 to the helper VM. The current implementation temporarily permits
-`0.0.0.0/0`. Access requires a random one-time key, and the host key is pinned
-through Server Agent. Public IP, key pair, and security group are removed after a
+for TCP/22 to the helper VM. This port is temporarily reachable from `0.0.0.0/0`;
+login requires a one-time key. Your security policy must permit this temporary
+access. Public IP, key pair, and security group are removed after a
 successful import. After an error, rerun promptly or inspect and clean up the
 labelled helper infrastructure.
 
 This temporary SSH channel is only used for image creation. It neither modifies
 nor uses the Coriolis appliance support SSH service.
 
-### Secret handling
+### Protect credentials and results
 
-- The service account key is read only for SDK authentication.
-- Credentials are never included in the result structure.
-- The generated admin password is stored root-only on the appliance.
-- Run Command output containing the admin password is not streamed live.
-- With direct certificates, the TLS private key remains on the appliance.
-- Vendor reconfiguration logs are not streamed and are removed after completion
-  or rollback.
-- A password supplied through `--admin-password` may remain in shell history.
+- Restrict service account keys and configurations containing passwords to
+  authorized users; never commit them.
+- Deployment output can include the generated admin password. Store it in a
+  protected secret store, not public build logs.
+- A password supplied through `--admin-password` may be visible in shell history
+  and process arguments. Avoid this method in shared environments.
+- With a directly installed certificate, the private key stays on the appliance.
+- Protect maintenance files, backups, and diagnostics. Remove confidential content
+  before sharing data with support.
+
+### Backups and maintenance
+
+Service updates require cold snapshots of all appliance volumes and exclusive
+maintenance access. They do not replace an independent backup. External databases,
+workers, and remote source and target systems are not covered.
+
+Retain the status file until completion and resume use only after successful
+verification and a functional test. There is no automatic rollback.
+See the [maintenance guide](operations.md#appliance-maintenance).
 
 ## Limitations and safeguards
 
 - Exactly one disk per OVA is supported.
 - A new OVA creates a new image but never replaces an existing VM automatically.
-- There is no automated data, license, or Coriolis application upgrade workflow.
+- Service updates require the explicitly approved maintenance workflow.
+  Cross-stream and operating-system upgrades are outside its scope.
+- Data and licenses are not automatically transferred to another appliance.
 - An existing server is not moved to another network automatically.
 - A failed VM is not deleted automatically.
 - Existing security-group rules are never removed.
 - The optional ALB covers only its HTTPS web path, not every Coriolis migration
   connection.
-- Changes to an existing ALB should be verified separately; reuse is primarily
-  based on name and certificate.
+- After changing an ALB, verify reachability, backend connections, and certificates
+  separately.
 
 These safeguards prevent a rerun from unintentionally replacing a licensed or
 already configured appliance.
-

@@ -10,7 +10,7 @@
 |---|---|---|
 | `project_id` | STACKIT target project | required |
 | `credentials` | Service account key path | required |
-| `ova` | Coriolis OVA path | required |
+| `ova` | Coriolis OVA path | required for deployment only |
 | `region` | STACKIT region | `eu01` |
 | `timeout` | Maximum runtime of each major deployment phase | `90m` |
 | `poll_interval` | Polling interval for asynchronous resources | `15s` |
@@ -102,7 +102,7 @@ TCP/443 to known administrator, proxy, or VPN ranges unless public access is nee
 | `public_ip` | Ensure a public IP in direct mode | `true` |
 | `public_ip_id` | Use a specific reserved public IP by ID | empty |
 | `public_ip_address` | Use a specific reserved public IP by address | empty |
-| `dns.enabled` | Manage DNS | `false` in code; enabled in example |
+| `dns.enabled` | Manage DNS | `false`; enabled in example |
 | `dns.create_zone` | Create a missing zone | `false` |
 | `dns.zone_id` | Existing zone ID | empty |
 | `dns.zone_name` | Zone name or DNS name | required without an ID |
@@ -130,7 +130,7 @@ record points to the load balancer's external address.
 Use `certificate.staging: true` for initial ACME tests. Switch to the production CA
 only after a successful test to avoid rate limits.
 
-## CLI overrides
+## Deployment options
 
 CLI flags override the corresponding YAML values:
 
@@ -180,3 +180,24 @@ Example without YAML for the three required values:
 All other values use defaults. For reproducible deployments, prefer a versioned
 YAML file that does not contain secrets.
 
+## Maintenance commands and options
+
+`status`, `versions`, `update`, and `update-status` use the project, region, and
+credentials from the same configuration but require no OVA. They run neither
+bootstrap nor certificate management.
+
+| Option | Available with | Meaning |
+|---|---|---|
+| `--config` | all maintenance commands | Load YAML configuration |
+| `--project-id`, `--credentials`, `--region` | all maintenance commands | Override the corresponding configuration value |
+| `--server-id` | all maintenance commands | Explicitly select an existing appliance |
+| `--target-version` | `update` | Newer numeric release in the same YYMM stream |
+| `--latest-compatible` | `update` | Select the newest eligible same-stream target; alternative to `--target-version` |
+| `--apply` | `update` | Execute a reviewed plan rather than only planning |
+| `--approve-plan` | `update --apply` | Confirm the reviewed plan's `approval` value |
+| `--confirm-server-id` | `update --apply` | Confirm target server, downtime, and exclusive maintenance access |
+| `--state-file` | `update --apply`, `update-status` | New execution status file, or the same file for subsequent verification |
+
+Deployment options `--dry-run` and `--check-cloud` do not apply to these
+subcommands. Without `--apply`, `update` only plans.
+Follow the [maintenance guide](operations.md#appliance-maintenance) for the full procedure.

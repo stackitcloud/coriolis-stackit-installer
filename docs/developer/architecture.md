@@ -1,6 +1,9 @@
 # Architecture and technical workflow
 
-[← Overview](../../README.md) | [Deutsch](../de/architecture.md)
+[← Developer documentation](README.md) | [Deutsch](architecture.de.md)
+
+This document is for developers and maintainers. User instructions are in
+[operations and maintenance](../en/operations.md).
 
 ## Detailed technical workflow
 
@@ -48,7 +51,8 @@ The helper VM then performs:
 1. installation of `qemu-utils`;
 2. VMDK to RAW conversion directly onto the high-performance source volume;
 3. writable mounting of the appliance root partition;
-4. offline installation and activation of the STACKIT Server Agent;
+4. extraction of the STACKIT Server Agent and activation of its unit without
+   configuring packages inside the mounted appliance filesystem;
 5. removal of machine-specific agent and cloud-init state only;
 6. RAW to QCOW2 conversion on the scratch volume;
 7. QCOW2 validation and upload through the STACKIT image upload URL;
@@ -137,3 +141,37 @@ The ALB is optional. Direct certificate installation keeps the default deploymen
 closer to the vendor product. The ALB covers only the configured Layer 7 web path;
 migration and worker connections are not routed through it automatically.
 
+### 9. Maintenance and in-place updates
+
+Maintenance commands are dispatched before deployment. They require no OVA and
+must not trigger bootstrap or certificate management.
+
+- Published target versions come from the official release notes. Component
+  manifests are checked inside the guest using Docker's existing authentication,
+  in one batch per target version.
+- Run Command does not necessarily provide the vendor console's environment.
+  Maintenance sets `HOME=/root` so Docker credential helpers also receive their
+  intended user context. Credentials must not be exported to the local CLI.
+- The shared package preflight checks audit, pending journals, and locks. It must
+  not repair packages and must permit an offline-extracted agent without dpkg
+  registration.
+- Package configuration whose postinst restarts the agent service must not be
+  repaired as that service's child process. Such administrative repairs need an
+  independent process and their own verification.
+- The plan binds the target, volume set, and appliance baseline to explicit
+  approval. The local maintenance journal is persisted before each cloud step;
+  existing attempts must not be overwritten.
+- Before snapshots, local submission paths are closed and workloads and data
+  across all tenants are checked again. Only then are containers and the VM
+  stopped. Every attached volume must be backed up with the VM stopped, and all
+  snapshots must be available before restarting the VM.
+- The updater runs as an independent systemd unit. Final verification requires
+  the target release, component images, health, and unchanged tenant data,
+  protected settings, and TLS fingerprints. Only then may the lock be released.
+- Failures must not trigger automatic database rollback or blind resubmission.
+  Snapshots and diagnostic state remain retained.
+
+The implementation is in [maintenance.go](../../installer/maintenance.go),
+[maintenance_cloud.go](../../installer/maintenance_cloud.go),
+[maintenance_update.go](../../installer/maintenance_update.go), and the associated
+collectors and tests.

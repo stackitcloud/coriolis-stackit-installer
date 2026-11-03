@@ -6,7 +6,8 @@
 
 ### 1. Build the binary
 
-Skip this step when a suitable binary already exists.
+Skip this step when a suitable binary already exists. Building requires the Go
+version specified in [go.mod](../../go.mod).
 
 ```bash
 make check
@@ -95,9 +96,9 @@ not replace a complete quota check.
 ./bin/coriolis-stackit --config config.yaml
 ```
 
-The first run can take considerably longer because it includes transfer, two
-conversions, and image import. The VMDK transfer and image upload regularly print
-percentage, transferred bytes, and throughput.
+The first run can take considerably longer because it transfers and prepares the
+image. Progress goes to stderr; the final result goes to stdout. Keep the command
+running until it completes.
 
 ### 6. Store the result securely
 
@@ -130,6 +131,12 @@ Run the same command again:
 ./bin/coriolis-stackit --config config.yaml
 ```
 
-A successful rerun reuses the image and infrastructure. When a current direct
-certificate is installed, the output contains `appliance certificate is current`;
-no new ACME order or container reconfiguration is performed.
+A successful rerun reuses matching images and infrastructure. A still-valid,
+directly installed certificate is reused. Repeating deployment does not update
+the Coriolis version.
+
+### 8. Manage the running appliance
+
+For health checks and service updates, follow the
+[maintenance guide](operations.md#appliance-maintenance). These commands require
+no OVA and do not repeat deployment.

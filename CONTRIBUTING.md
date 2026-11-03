@@ -46,7 +46,8 @@ go build -trimpath -o bin/coriolis-stackit ./cmd/coriolis-stackit
 ```
 
 `make check` runs tests and the build; run `go vet ./...` separately.
-See the [development guide](docs/en/development.md) for more background.
+See the separate [developer documentation](docs/developer/README.md) for repository
+layout, architecture, and implementation guidance.
 
 Preserve safe repeated deployments and interrupted-run recovery. Changes must
 respect existing resources and keep credentials out of logs and error messages.
@@ -57,6 +58,9 @@ create billable resources. Ordinary contributions do not require cloud access.
 Update the English and German documentation and configuration examples when
 user-visible behavior or settings change. Keep local credentials, configurations,
 appliance images, and build artifacts out of commits.
+
+Keep user instructions in `docs/en/` and `docs/de/`. Put implementation details and
+developer guidance in `docs/developer/`, not in installation or operations guides.
 
 ## Opening a pull request
 

@@ -6,7 +6,8 @@
 
 ### 1. Binary bauen
 
-Dieser Schritt entfällt, wenn bereits ein passendes Binary vorliegt.
+Dieser Schritt entfällt, wenn bereits ein passendes Binary vorliegt. Zum Bauen
+wird die in [go.mod](../../go.mod) angegebene Go-Version benötigt.
 
 ```bash
 make check
@@ -95,9 +96,9 @@ Ressourcen und ersetzt keine vollständige Quota-Prüfung.
 ./bin/coriolis-stackit --config config.yaml
 ```
 
-Der erste Lauf kann wegen Upload, zwei Konvertierungen und Image-Import deutlich
-länger dauern. Für den VMDK-Transfer sowie den Image-Upload wird regelmäßig ein
-prozentualer Fortschritt mit Datenmenge und Übertragungsrate ausgegeben.
+Der erste Lauf kann wegen Übertragung und Aufbereitung des Images deutlich länger
+dauern. Fortschrittsmeldungen erscheinen auf stderr, das abschließende Ergebnis
+auf stdout. Den Befehl bis zum Abschluss laufen lassen.
 
 ### 6. Ergebnis sicher speichern
 
@@ -131,6 +132,12 @@ Der gleiche Befehl darf erneut ausgeführt werden:
 ./bin/coriolis-stackit --config config.yaml
 ```
 
-Ein erfolgreicher Wiederholungslauf verwendet Image und Infrastruktur erneut. Bei
-einem aktuellen direkten Zertifikat erscheint `appliance certificate is current`;
-es findet dann weder eine neue ACME-Anforderung noch ein Container-Reconfigure statt.
+Ein erfolgreicher Wiederholungslauf verwendet passende Images und Infrastruktur
+erneut. Ein noch gültiges, direkt installiertes Zertifikat wird weiterverwendet.
+Ein Deployment-Wiederholungslauf aktualisiert nicht die Coriolis-Version.
+
+### 8. Laufende Appliance verwalten
+
+Für Statusprüfung und Service-Updates die
+[Wartungsanleitung](operations.md#appliance-wartung) verwenden. Diese Befehle
+benötigen keine OVA und führen kein erneutes Deployment aus.

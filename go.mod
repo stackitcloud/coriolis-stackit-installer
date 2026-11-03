@@ -4,6 +4,7 @@ go 1.25.0
 
 require (
 	github.com/go-acme/lego/v4 v4.35.2
+	github.com/google/uuid v1.6.0
 	github.com/stackitcloud/stackit-sdk-go/core v0.27.0
 	github.com/stackitcloud/stackit-sdk-go/services/alb v0.17.1
 	github.com/stackitcloud/stackit-sdk-go/services/certificates v1.9.1
@@ -19,7 +20,6 @@ require (
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
 	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
 	github.com/golang-jwt/jwt/v5 v5.3.1 // indirect
-	github.com/google/uuid v1.6.0 // indirect
 	github.com/miekg/dns v1.1.72 // indirect
 	golang.org/x/mod v0.35.0 // indirect
 	golang.org/x/net v0.53.0 // indirect
