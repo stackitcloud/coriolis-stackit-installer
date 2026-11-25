@@ -357,6 +357,8 @@ esac
 			}
 			script := strings.ReplaceAll(quiesceUpdateScript(UpdateJournal{ID: id, Plan: plan}),
 				"/var/lib/coriolis-stackit", root)
+			// macOS Bash 3.2 has no mapfile; enforce that constraint on newer Bash too.
+			script = "enable -n mapfile 2>/dev/null || true\n" + script
 			cmd := exec.Command(bash, "-c", script)
 			cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"), "CORIOLIS_FIXTURE_ROOT="+root)
 			output, err := cmd.CombinedOutput()
@@ -431,6 +433,8 @@ func TestVendorRunnerPreservesConfigurationAndRecordsFailures(t *testing.T) {
 				"/etc/coriolis", config,
 				"/etc/kolla", kolla,
 			).Replace(script)
+			// macOS Bash 3.2 has no mapfile; enforce that constraint on newer Bash too.
+			script = "enable -n mapfile 2>/dev/null || true\n" + script
 			cmd := exec.Command(bash, "-c", script)
 			cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"),
 				"CORIOLIS_FIXTURE_ROOT="+root, "CORIOLIS_FIXTURE_MODE="+mode)
@@ -470,44 +474,44 @@ func TestStatusCollectorHealthAndSecretRedaction(t *testing.T) {
 		t.Skip("python3 is not available")
 	}
 	harness := `
-	import json, pathlib, subprocess, sys, types
-	from unittest.mock import patch, mock_open
-	namespace = {}
-	exec(sys.stdin.read().rsplit("\ntry:", 1)[0], namespace)
-	scenario = sys.argv[1]
-	def command(args):
-	    if args[0] == "git":
-	        return "a" * 40 if args[-1] == "HEAD" else ""
-	    if args[:2] == ["docker", "ps"]:
-	        return "one"
-	    if args[:2] == ["docker", "inspect"]:
-	        return json.dumps([{"Name": "/coriolis-api", "Image": "sha256:image",
-	            "Config": {"Image": "registry/coriolis-api:2608.2"}, "Mounts": [],
-	            "State": {"Status": "running", "Health": {"Status": "unhealthy" if scenario == "container" else "healthy"}}}])
-	    if args[0] == "ip":
-	        return "1.1.1.1 via 10.1.0.1 dev eth0 src 10.1.0.2"
-	    if scenario == "identity" and args[0] == "openstack":
-	        raise subprocess.CalledProcessError(1, args, stderr="SUPER_SECRET_PASSWORD")
-	    return ""
-	def database(*args, **kwargs):
-	    if args[0][0] == "dpkg":
-	        return types.SimpleNamespace(stdout="half configured" if scenario == "packages" else "")
-	    if scenario == "database":
-	        raise subprocess.CalledProcessError(1, args, stderr="SUPER_SECRET_PASSWORD")
-	    return types.SimpleNamespace(stdout=json.dumps({"inventory": {"endpoint": "hash"},
-	        "active_executions": 2 if scenario == "busy" else 0, "enabled_schedules": 0}))
-	namespace["command"] = command
-	namespace["sys"].argv = ["status", ""]
-	with patch.object(pathlib.Path, "read_text", return_value="2608.2"), \
-	     patch.object(pathlib.Path, "read_bytes", return_value=b"secret config"), \
-	     patch.object(pathlib.Path, "is_file", return_value=True), \
-	     patch.object(pathlib.Path, "exists", return_value=False), \
-	     patch.object(pathlib.Path, "iterdir", return_value=[]), \
-	     patch("builtins.open", mock_open()), \
-	     patch("fcntl.lockf"), \
-	     patch("os.statvfs", return_value=types.SimpleNamespace(f_bavail=70, f_bfree=70, f_blocks=100)), \
-	     patch("subprocess.run", side_effect=database):
-	    namespace["collect"]()
+import json, pathlib, subprocess, sys, types
+from unittest.mock import patch, mock_open
+namespace = {}
+exec(sys.stdin.read().rsplit("\ntry:", 1)[0], namespace)
+scenario = sys.argv[1]
+def command(args):
+    if args[0] == "git":
+        return "a" * 40 if args[-1] == "HEAD" else ""
+    if args[:2] == ["docker", "ps"]:
+        return "one"
+    if args[:2] == ["docker", "inspect"]:
+        return json.dumps([{"Name": "/coriolis-api", "Image": "sha256:image",
+            "Config": {"Image": "registry/coriolis-api:2608.2"}, "Mounts": [],
+            "State": {"Status": "running", "Health": {"Status": "unhealthy" if scenario == "container" else "healthy"}}}])
+    if args[0] == "ip":
+        return "1.1.1.1 via 10.1.0.1 dev eth0 src 10.1.0.2"
+    if scenario == "identity" and args[0] == "openstack":
+        raise subprocess.CalledProcessError(1, args, stderr="SUPER_SECRET_PASSWORD")
+    return ""
+def database(*args, **kwargs):
+    if args[0][0] == "dpkg":
+        return types.SimpleNamespace(stdout="half configured" if scenario == "packages" else "")
+    if scenario == "database":
+        raise subprocess.CalledProcessError(1, args, stderr="SUPER_SECRET_PASSWORD")
+    return types.SimpleNamespace(stdout=json.dumps({"inventory": {"endpoint": "hash"},
+        "active_executions": 2 if scenario == "busy" else 0, "enabled_schedules": 0}))
+namespace["command"] = command
+namespace["sys"].argv = ["status", ""]
+with patch.object(pathlib.Path, "read_text", return_value="2608.2"), \
+     patch.object(pathlib.Path, "read_bytes", return_value=b"secret config"), \
+     patch.object(pathlib.Path, "is_file", return_value=True), \
+     patch.object(pathlib.Path, "exists", return_value=False), \
+     patch.object(pathlib.Path, "iterdir", return_value=[]), \
+     patch("builtins.open", mock_open()), \
+     patch("fcntl.lockf"), \
+     patch("os.statvfs", return_value=types.SimpleNamespace(f_bavail=70, f_bfree=70, f_blocks=100)), \
+     patch("subprocess.run", side_effect=database):
+    namespace["collect"]()
 	`
 	for _, scenario := range []string{"healthy", "container", "identity", "database", "busy", "packages"} {
 		t.Run(scenario, func(t *testing.T) {

@@ -60,7 +60,10 @@ work=%s
 test "$(cat /var/lib/coriolis-stackit/update-lock/id)" = %s
 exec >>"$work/prepare.log" 2>&1
 docker ps --format '{{.Names}}' > "$work/running-containers"
-mapfile -t running < "$work/running-containers"
+running=()
+while IFS= read -r container || [ -n "$container" ]; do
+  running+=("$container")
+done < "$work/running-containers"
 test "${#running[@]}" -gt 0
 # Close local submission paths before checking all tenant workloads again.
 docker stop --time 120 coriolis-api coriolis-scheduler coriolis-transfer-cron
@@ -132,7 +135,10 @@ python3 "$base/upgrade_coriolis.py" -u "$base/utils/upgrade_scripts" -c %s -n %s
 cp -a /etc/coriolis/coriolis.conf "$work/coriolis.conf.generated"
 cp -a "$work/coriolis.conf" /etc/coriolis/coriolis.conf
 cmp "$work/passwords.yml" /etc/kolla/passwords.yml
-mapfile -t services < <(docker ps -a --format '{{.Names}}' | grep '^coriolis-')
+services=()
+while IFS= read -r service || [ -n "$service" ]; do
+  services+=("$service")
+done < <(docker ps -a --format '{{.Names}}' | grep '^coriolis-')
 test "${#services[@]}" -gt 0
 docker restart "${services[@]}"
 echo "Vendor updater completed; independent verification via update-status is still required."
